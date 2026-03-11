@@ -1,0 +1,28 @@
+# Web framework
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+
+# Settings & env
+pydantic>=2.6.0
+pydantic-settings>=2.2.0
+python-dotenv>=1.0.0
+
+# Structured LLM output parsing
+instructor>=1.2.0
+
+# LLM providers (add as needed)
+openai>=1.14.0          # used by instructor's default integration
+
+# Vector store — PostgreSQL + pgvector
+asyncpg>=0.29.0
+pgvector>=0.2.5
+
+# Graph store — Neo4j
+neo4j>=5.18.0
+
+# HTTP client (test client + potential external calls)
+httpx>=0.27.0
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
