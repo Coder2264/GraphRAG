@@ -12,6 +12,11 @@ instructor>=1.2.0
 
 # LLM providers (add as needed)
 openai>=1.14.0          # used by instructor's default integration
+ollama>=0.2.0           # Ollama async client (local LLMs + embeddings)
+
+# Document processing
+pypdf>=4.0.0            # PDF text extraction (no OCR, plain-text only)
+python-multipart>=0.0.9 # FastAPI file upload support
 
 # Vector store — PostgreSQL + pgvector
 asyncpg>=0.29.0

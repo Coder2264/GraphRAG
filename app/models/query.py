@@ -33,3 +33,4 @@ class QueryResponse(BaseModel):
     answer: str = Field(..., description="LLM-generated answer.")
     context: str = Field("", description="Retrieved context used to generate the answer.")
     sources: list[str] = Field(default_factory=list, description="Source doc IDs used.")
+    elapsed_seconds: float = Field(..., description="Wall-clock seconds from request receipt to response.")

@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 
 class IngestRequest(BaseModel):
-    """Payload for document ingestion."""
+    """Payload for document ingestion (JSON body route)."""
 
     content: str = Field(..., description="Raw text / document content to ingest.")
     metadata: dict = Field(default_factory=dict, description="Arbitrary key-value metadata.")
@@ -22,4 +22,5 @@ class IngestResponse(BaseModel):
 
     doc_id: str = Field(..., description="Unique identifier assigned to the ingested document.")
     message: str = Field("Document ingested successfully.", description="Human-readable status.")
+    chunks_count: int = Field(0, description="Number of chunks stored in the vector store.")
     metadata: dict = Field(default_factory=dict)

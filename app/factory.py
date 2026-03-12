@@ -17,12 +17,14 @@ from app.core.ingestion import BaseIngestionPipeline
 from app.core.llm import BaseLLM
 from app.core.retriever import BaseRetriever
 from app.core.vector_store import BaseVectorStore
+from app.implementations.document_processor import DefaultDocumentProcessor
 from app.implementations.in_memory.ingestion import InMemoryIngestionPipeline
 from app.implementations.in_memory.retrievers import (
     GraphRAGRetriever,
     NoneRetriever,
     RAGRetriever,
 )
+from app.implementations.rag.ingestion import RAGIngestionPipeline
 from app.models.query import QueryMode
 from app.registry import (
     EMBEDDER_REGISTRY,
@@ -88,10 +90,20 @@ class ServiceFactory:
 
     def _build_llm(self) -> BaseLLM:
         cls = LLM_REGISTRY[self._llm_key]
+        if self._llm_key == "ollama":
+            return cls(  # type: ignore[call-arg]
+                model_name=settings.ollama_llm_model,
+                base_url=settings.ollama_base_url,
+            )
         return cls()
 
     def _build_embedder(self) -> BaseEmbedder:
         cls = EMBEDDER_REGISTRY[self._embedder_key]
+        if self._embedder_key == "ollama":
+            return cls(  # type: ignore[call-arg]
+                model_name=settings.ollama_embed_model,
+                base_url=settings.ollama_base_url,
+            )
         return cls()
 
     def _build_graph_store(self) -> BaseGraphStore:
@@ -107,7 +119,10 @@ class ServiceFactory:
     def _build_vector_store(self) -> BaseVectorStore:
         cls = VECTOR_STORE_REGISTRY[self._vector_store_key]
         if self._vector_store_key == "postgres":
-            return cls(dsn=settings.postgres_dsn)  # type: ignore[call-arg]
+            return cls(  # type: ignore[call-arg]
+                dsn=settings.postgres_dsn,
+                embedding_dim=settings.embedding_dim,
+            )
         return cls()
 
     # ------------------------------------------------------------------
@@ -116,6 +131,14 @@ class ServiceFactory:
 
     def get_ingestion_pipeline(self) -> BaseIngestionPipeline:
         assert self._embedder and self._vector_store and self._graph_store
+        # Use the real RAG pipeline when postgres vector store is active
+        if self._vector_store_key == "postgres":
+            return RAGIngestionPipeline(
+                document_processor=DefaultDocumentProcessor(),
+                embedder=self._embedder,
+                vector_store=self._vector_store,
+            )
+        # Fallback: in-memory stub (also wires graph store for GraphRAG path)
         return InMemoryIngestionPipeline(
             embedder=self._embedder,
             vector_store=self._vector_store,

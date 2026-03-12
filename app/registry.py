@@ -14,6 +14,8 @@ from app.implementations.in_memory.graph_store import InMemoryGraphStore
 from app.implementations.in_memory.llm import InMemoryLLM
 from app.implementations.in_memory.vector_store import InMemoryVectorStore
 from app.implementations.neo4j.graph_store import Neo4jGraphStore
+from app.implementations.ollama.embedder import OllamaEmbedder
+from app.implementations.ollama.llm import OllamaLLM
 from app.implementations.postgres.vector_store import PostgresVectorStore
 
 if TYPE_CHECKING:
@@ -28,9 +30,9 @@ if TYPE_CHECKING:
 # ------------------------------------------------------------------
 LLM_REGISTRY: dict[str, type[BaseLLM]] = {
     "in_memory": InMemoryLLM,
-    # "openai":     OpenAILLM,       ← uncomment when ready
+    "ollama": OllamaLLM,
+    # "openai":     OpenAILLM,    ← uncomment when ready
     # "anthropic":  AnthropicLLM,
-    # "ollama":     OllamaLLM,
 }
 
 # ------------------------------------------------------------------
@@ -38,6 +40,7 @@ LLM_REGISTRY: dict[str, type[BaseLLM]] = {
 # ------------------------------------------------------------------
 EMBEDDER_REGISTRY: dict[str, type[BaseEmbedder]] = {
     "in_memory": InMemoryEmbedder,
+    "ollama": OllamaEmbedder,
     # "openai":   OpenAIEmbedder,
     # "cohere":   CohereEmbedder,
 }
