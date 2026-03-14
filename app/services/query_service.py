@@ -12,6 +12,9 @@ from app.core.llm import BaseLLM
 from app.core.retriever import BaseRetriever
 from app.models.query import QueryMode, QueryRequest, QueryResponse
 from app.prompts import (
+    GRAPH_RAG_SYSTEM_PROMPT,
+    NO_RAG_SYSTEM_PROMPT,
+    RAG_SYSTEM_PROMPT,
     graph_rag_user_prompt,
     no_rag_user_prompt,
     rag_user_prompt,
@@ -54,16 +57,24 @@ class QueryService:
             top_k=request.top_k,
         )
 
-        # 2. Build mode-specific prompt from prompts.py
+        # 2. Build mode-specific prompt + system prompt from prompts.py
         if mode == QueryMode.RAG:
+            system_prompt = RAG_SYSTEM_PROMPT
             prompt = rag_user_prompt(request.question, retrieval.context)
         elif mode == QueryMode.GRAPHRAG:
+            system_prompt = GRAPH_RAG_SYSTEM_PROMPT
             prompt = graph_rag_user_prompt(request.question, retrieval.context)
         else:  # QueryMode.NONE
+            system_prompt = NO_RAG_SYSTEM_PROMPT
             prompt = no_rag_user_prompt(request.question)
 
-        # 3. Generate answer
-        answer = await self._llm.generate(prompt=prompt, context=retrieval.context)
+        # 3. Generate answer — system_prompt is sent as a dedicated system
+        #    message so the model treats it with higher authority than user text
+        answer = await self._llm.generate(
+            prompt=prompt,
+            context=retrieval.context,
+            system_prompt=system_prompt,
+        )
 
         elapsed = round(time.perf_counter() - t_start, 3)
 

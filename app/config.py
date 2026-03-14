@@ -1,4 +1,4 @@
-"""Application settings loaded from environment variables / .env file."""
+"""Application settings — all values sourced from .env file."""
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -6,40 +6,33 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # --- API Keys ---
+    # API Keys
     openai_api_key: str = ""
     anthropic_api_key: str = ""
 
-    # --- Databases ---
-    postgres_dsn: str = "postgresql+asyncpg://user:password@localhost:5432/graphrag"
-    neo4j_uri: str = "bolt://localhost:7687"
-    neo4j_user: str = "neo4j"
-    neo4j_password: str = "password"
+    # Databases
+    postgres_dsn: str = ""
+    neo4j_uri: str = ""
+    neo4j_user: str = ""
+    neo4j_password: str = ""
 
-    # --- Ollama ---
-    ollama_base_url: str = "http://localhost:11434"
-    ollama_llm_model: str = "llama3.2"
-    ollama_embed_model: str = "nomic-embed-text"
+    # Ollama
+    ollama_base_url: str = ""
+    ollama_llm_model: str = ""
+    ollama_embed_model: str = ""
 
-    # --- Embedding ---
-    # Dimension MUST match the embedding model.
-    # nomic-embed-text → 768  |  mxbai-embed-large → 1024  |  OpenAI text-embedding-3-small → 1536
-    embedding_dim: int = 768
+    # Embedding
+    embedding_dim: int = 0
 
-    # --- Chunking ---
-    chunk_size: int = 512    # characters per chunk
-    chunk_overlap: int = 64  # overlap between consecutive chunks
+    # Chunking
+    chunk_size: int = 0
+    chunk_overlap: int = 0
 
-    # --- Default providers (looked up in registry.py) ---
-    # Switch instantly by changing these values (or setting env vars).
-    # Options: "ollama" | "in_memory" | "openai" | ...
-    default_llm: str = "ollama"
-    # Options: "ollama" | "in_memory" | "openai" | ...
-    default_embedder: str = "ollama"
-    # Options: "in_memory" | "neo4j"
-    default_graph_store: str = "in_memory"
-    # Options: "postgres" | "in_memory"
-    default_vector_store: str = "postgres"
+    # Default providers
+    default_llm: str = ""
+    default_embedder: str = ""
+    default_graph_store: str = ""
+    default_vector_store: str = ""
 
 
 settings = Settings()

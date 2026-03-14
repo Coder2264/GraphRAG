@@ -48,17 +48,27 @@ class OllamaLLM(BaseLLM):
     # BaseLLM interface
     # ------------------------------------------------------------------
 
-    async def generate(self, prompt: str, context: str = "") -> str:
+    async def generate(
+        self, prompt: str, context: str = "", system_prompt: str = ""
+    ) -> str:
         """
-        Send `prompt` (already-formatted by QueryService) to Ollama chat.
+        Send `prompt` to Ollama chat.
 
-        The `context` arg is embedded in the prompt by QueryService via
-        prompts.py before this method is called — no further handling needed.
+        If `system_prompt` is provided it is sent as a dedicated system-role
+        message *before* the user turn.  This is what instructs the model to
+        answer ONLY from the retrieved context in RAG mode — without it the
+        model falls back to its pre-trained knowledge and ignores the context.
         """
         client = self._client()
+
+        messages: list[dict] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
         response = await client.chat(
             model=self.model_name,
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
         )
         return response.message.content  # type: ignore[attr-defined]
 
@@ -67,6 +77,7 @@ class OllamaLLM(BaseLLM):
         prompt: str,
         response_model: Type[BaseModel],
         context: str = "",
+        system_prompt: str = "",
     ) -> Any:
         """
         Structured generation via Ollama.
@@ -86,7 +97,7 @@ class OllamaLLM(BaseLLM):
             f"{response_model.model_json_schema()}\n"
             "Return ONLY the JSON object, no explanation."
         )
-        raw = await self.generate(json_prompt, context)
+        raw = await self.generate(json_prompt, context, system_prompt)
 
         # Strip markdown fences if present
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()

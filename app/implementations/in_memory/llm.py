@@ -29,7 +29,9 @@ class InMemoryLLM(BaseLLM):
     def __init__(self, model_name: str = "in-memory-v1") -> None:
         self.model_name = model_name
 
-    async def generate(self, prompt: str, context: str = "") -> str:
+    async def generate(
+        self, prompt: str, context: str = "", system_prompt: str = ""
+    ) -> str:
         """Return a stub response incorporating the query and context summary."""
         ctx_note = f" (context length: {len(context)} chars)" if context else " (no context)"
         return (
@@ -42,6 +44,7 @@ class InMemoryLLM(BaseLLM):
         prompt: str,
         response_model: Type[BaseModel],
         context: str = "",
+        system_prompt: str = "",
     ) -> Any:
         """
         Stub structured generation.

@@ -1,1 +1,1 @@
-"""In-memory stub implementations package."""
+"""Implementations package."""
