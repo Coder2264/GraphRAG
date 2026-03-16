@@ -142,7 +142,13 @@ class ServiceFactory:
         Returns:
             A fully constructed BaseEntityExtractor instance.
         """
-        cls = ENTITY_EXTRACTOR_REGISTRY[self._entity_extractor_key]
+        cls = ENTITY_EXTRACTOR_REGISTRY.get(self._entity_extractor_key)
+        if cls is None:
+            available_keys = ", ".join(sorted(ENTITY_EXTRACTOR_REGISTRY.keys()))
+            raise ValueError(
+                f"Unknown entity extractor key {self._entity_extractor_key!r}. "
+                f"Available entity extractors: {available_keys}"
+            )
         if self._entity_extractor_key == "ollama":
             return cls(  # type: ignore[call-arg]
                 model_name=settings.ollama_llm_model,
