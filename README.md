@@ -127,6 +127,9 @@ pip install -r requirements.txt
 
 # 3. Start the application
 uvicorn main:app --reload
+
+# 4. Check current logs separately (optional, but helpful for debugging)
+tail -f logs/app.log
 ```
 
 Then visit the interactive API documentation at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
