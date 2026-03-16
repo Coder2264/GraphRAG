@@ -103,18 +103,34 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
 
         # 2. Load type catalogs from Postgres
         entity_types, relation_types = await self._load_type_catalogs()
+        logger.info(
+            "GraphRAG [%s]: loaded %d entity types, %d relation types",
+            doc_id, len(entity_types), len(relation_types),
+        )
 
         # 3. Extract entities + relations via LLM
+        logger.info("GraphRAG [%s]: starting entity extraction (text length=%d chars)", doc_id, len(text))
         extraction = await self._extractor.extract(text, entity_types, relation_types)
         entities: list[dict] = extraction.get("entities", [])
         relations: list[dict] = extraction.get("relations", [])
 
         logger.info(
-            "GraphRAG extraction: %d entities, %d relations for doc %s",
-            len(entities), len(relations), doc_id,
+            "GraphRAG [%s]: extracted %d entities, %d relations",
+            doc_id, len(entities), len(relations),
         )
+        for e in entities:
+            logger.info(
+                "  entity: name=%r  type=%s  id=%s",
+                e.get("name"), e.get("type"), e.get("id"),
+            )
+        for r in relations:
+            logger.info(
+                "  relation: %s -[%s]-> %s",
+                r.get("src_id"), r.get("relation"), r.get("dst_id"),
+            )
 
         # 4. Persist :Document root node
+        logger.info("GraphRAG [%s]: persisting Document node to Neo4j", doc_id)
         await self._graph_store.add_node(
             node_id=doc_id,
             labels=["Document"],
@@ -170,6 +186,10 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
             )
 
         self._last_entities_count = len(entities)
+        logger.info(
+            "GraphRAG [%s]: ingestion complete — %d entities and %d relations written to Neo4j",
+            doc_id, len(entities), len(relations),
+        )
         return doc_id
 
     async def delete(self, doc_id: str) -> None:

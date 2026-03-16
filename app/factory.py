@@ -120,6 +120,7 @@ class ServiceFactory:
                 uri=settings.neo4j_uri,
                 user=settings.neo4j_user,
                 password=settings.neo4j_password,
+                database=settings.neo4j_database,
             )
         return cls()
 

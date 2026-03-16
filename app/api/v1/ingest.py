@@ -6,6 +6,7 @@ Two routes:
   POST /api/v1/ingest/upload   — multipart file upload (PDF or TXT)
 """
 
+import logging
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -14,6 +15,7 @@ from app.dependencies import get_ingestion_service
 from app.models.ingest import IngestRequest, IngestResponse
 from app.services.ingestion_service import IngestionService
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ingest", tags=["ingestion"])
 
 # ---------------------------------------------------------------------------
@@ -34,7 +36,12 @@ async def ingest_document(
     request: IngestRequest,
     service: Annotated[IngestionService, Depends(get_ingestion_service)],
 ) -> IngestResponse:
-    return await service.ingest_document(request)
+    response = await service.ingest_document(request)
+    logger.info(
+        "Ingest complete — doc_id=%s  chunks=%d  graph_entities=%d",
+        response.doc_id, response.chunks_count, response.graph_entities_count,
+    )
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -73,9 +80,14 @@ async def ingest_file(
         )
 
     metadata = {"source": source or file.filename}
-    return await service.ingest_file(
+    response = await service.ingest_file(
         file_bytes=file_bytes,
         filename=file.filename or "upload",
         metadata=metadata,
     )
+    logger.info(
+        "Ingest complete — file=%s  doc_id=%s  chunks=%d  graph_entities=%d",
+        file.filename, response.doc_id, response.chunks_count, response.graph_entities_count,
+    )
+    return response
 

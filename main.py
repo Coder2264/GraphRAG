@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.router import router as v1_router
 from app.dependencies import set_factory
 from app.factory import ServiceFactory
+from app.logging_config import setup_logging
 
 
 @asynccontextmanager
@@ -24,6 +25,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     On startup: build the ServiceFactory, open DB connections.
     On shutdown: gracefully close them.
     """
+    setup_logging()
     factory = ServiceFactory()
     await factory.startup()
     set_factory(factory)

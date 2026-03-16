@@ -10,11 +10,14 @@ Uses the official async Neo4j Python driver.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from neo4j import AsyncGraphDatabase, AsyncDriver
 
 from app.core.graph_store import BaseGraphStore
+
+logger = logging.getLogger(__name__)
 
 
 class Neo4jGraphStore(BaseGraphStore):
@@ -24,10 +27,11 @@ class Neo4jGraphStore(BaseGraphStore):
     Swap in by registering "neo4j" in registry.py.
     """
 
-    def __init__(self, uri: str, user: str, password: str) -> None:
+    def __init__(self, uri: str, user: str, password: str, database: str = "graphRAG") -> None:
         self._uri = uri
         self._user = user
         self._password = password
+        self._database = database
         self._driver: AsyncDriver | None = None
 
     # ------------------------------------------------------------------
@@ -42,6 +46,7 @@ class Neo4jGraphStore(BaseGraphStore):
         )
         # Verify connectivity
         await self._driver.verify_connectivity()
+        logger.info("Connected to Neo4j at %s (database=%s)", self._uri, self._database)
         # Ensure constraints + indexes exist (idempotent)
         await self.setup_schema()
 
@@ -56,7 +61,7 @@ class Neo4jGraphStore(BaseGraphStore):
             (used by search_nodes for fast keyword lookup)
         """
         assert self._driver, "Call connect() first."
-        async with self._driver.session() as session:
+        async with self._driver.session(database=self._database) as session:
             # Uniqueness constraints — safe to re-run (IF NOT EXISTS)
             await session.run(
                 "CREATE CONSTRAINT entity_id_unique IF NOT EXISTS "
@@ -84,7 +89,7 @@ class Neo4jGraphStore(BaseGraphStore):
         """MERGE a node by its id property, set labels and properties."""
         assert self._driver, "Call connect() first."
         label_str = ":".join(labels) if labels else "Node"
-        async with self._driver.session() as session:
+        async with self._driver.session(database=self._database) as session:
             await session.run(
                 f"""
                 MERGE (n:{label_str} {{id: $node_id}})
@@ -103,7 +108,7 @@ class Neo4jGraphStore(BaseGraphStore):
     ) -> None:
         """MERGE a directed relationship between two nodes."""
         assert self._driver, "Call connect() first."
-        async with self._driver.session() as session:
+        async with self._driver.session(database=self._database) as session:
             await session.run(
                 f"""
                 MATCH (a {{id: $src_id}}), (b {{id: $dst_id}})
@@ -121,7 +126,7 @@ class Neo4jGraphStore(BaseGraphStore):
 
     async def get_node(self, node_id: str) -> dict[str, Any] | None:
         assert self._driver, "Call connect() first."
-        async with self._driver.session() as session:
+        async with self._driver.session(database=self._database) as session:
             result = await session.run(
                 "MATCH (n {id: $node_id}) RETURN properties(n) AS props LIMIT 1",
                 node_id=node_id,
@@ -132,7 +137,7 @@ class Neo4jGraphStore(BaseGraphStore):
     async def get_subgraph(self, node_id: str, depth: int = 1) -> dict[str, Any]:
         """Return nodes and relationships within `depth` hops of `node_id`."""
         assert self._driver, "Call connect() first."
-        async with self._driver.session() as session:
+        async with self._driver.session(database=self._database) as session:
             result = await session.run(
                 f"""
                 MATCH path = (root {{id: $node_id}})-[*0..{depth}]-(neighbour)
@@ -164,7 +169,7 @@ class Neo4jGraphStore(BaseGraphStore):
             CREATE FULLTEXT INDEX nodeSearch FOR (n:Document) ON EACH [n.content_preview]
         """
         assert self._driver, "Call connect() first."
-        async with self._driver.session() as session:
+        async with self._driver.session(database=self._database) as session:
             result = await session.run(
                 """
                 MATCH (n)
@@ -186,7 +191,7 @@ class Neo4jGraphStore(BaseGraphStore):
     async def delete_node(self, node_id: str) -> None:
         """Delete a node and all its relationships."""
         assert self._driver, "Call connect() first."
-        async with self._driver.session() as session:
+        async with self._driver.session(database=self._database) as session:
             await session.run(
                 "MATCH (n {id: $node_id}) DETACH DELETE n",
                 node_id=node_id,

@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     neo4j_uri: str = ""
     neo4j_user: str = ""
     neo4j_password: str = ""
+    neo4j_database: str = "graphRAG"
 
     # Ollama
     ollama_base_url: str = ""
