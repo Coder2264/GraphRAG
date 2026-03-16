@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     default_embedder: str = ""
     default_graph_store: str = ""
     default_vector_store: str = ""
+    default_entity_extractor: str = ""
 
 
 settings = Settings()

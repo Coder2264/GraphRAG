@@ -26,11 +26,11 @@ from app.implementations.in_memory.retrievers import (
     NoneRetriever,
     RAGRetriever,
 )
-from app.implementations.ollama.entity_extractor import OllamaEntityExtractor
 from app.implementations.rag.ingestion import RAGIngestionPipeline
 from app.models.query import QueryMode
 from app.registry import (
     EMBEDDER_REGISTRY,
+    ENTITY_EXTRACTOR_REGISTRY,
     GRAPH_STORE_REGISTRY,
     LLM_REGISTRY,
     VECTOR_STORE_REGISTRY,
@@ -53,12 +53,14 @@ class ServiceFactory:
         embedder_key: Optional[str] = None,
         graph_store_key: Optional[str] = None,
         vector_store_key: Optional[str] = None,
+        entity_extractor_key: Optional[str] = None,
     ) -> None:
         # Fall back to settings defaults if not explicitly overridden
         self._llm_key = llm_key or settings.default_llm
         self._embedder_key = embedder_key or settings.default_embedder
         self._graph_store_key = graph_store_key or settings.default_graph_store
         self._vector_store_key = vector_store_key or settings.default_vector_store
+        self._entity_extractor_key = entity_extractor_key or settings.default_entity_extractor
 
         # Shared singleton instances (avoids re-creating pools on every request)
         self._llm: BaseLLM | None = None
@@ -132,19 +134,27 @@ class ServiceFactory:
 
     def _build_entity_extractor(self) -> BaseEntityExtractor:
         """
-        Build the entity extractor.
+        Build the entity extractor from the registry.
 
-        Currently always uses OllamaEntityExtractor (same Ollama instance as
-        the LLM).  Extend this method to support other backends.
+        Args:
+            None — reads self._entity_extractor_key set during __init__.
+
+        Returns:
+            A fully constructed BaseEntityExtractor instance.
         """
-        if self._llm_key == "ollama":
-            return OllamaEntityExtractor(
+        cls = ENTITY_EXTRACTOR_REGISTRY.get(self._entity_extractor_key)
+        if cls is None:
+            available_keys = ", ".join(sorted(ENTITY_EXTRACTOR_REGISTRY.keys()))
+            raise ValueError(
+                f"Unknown entity extractor key {self._entity_extractor_key!r}. "
+                f"Available entity extractors: {available_keys}"
+            )
+        if self._entity_extractor_key == "ollama":
+            return cls(  # type: ignore[call-arg]
                 model_name=settings.ollama_llm_model,
                 base_url=settings.ollama_base_url,
             )
-        # Fallback: import inline to avoid circular dependency at module level
-        from app.implementations.in_memory.entity_extractor import InMemoryEntityExtractor
-        return InMemoryEntityExtractor()
+        return cls()
 
     # ------------------------------------------------------------------
     # Service getters (called by FastAPI Depends)
