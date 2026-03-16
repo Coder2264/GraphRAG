@@ -94,7 +94,7 @@ Output format (strict — no markdown, no explanation, no extra keys):
     {
       "id": "<unique_slug_no_spaces>",
       "name": "<entity name as it appears in text>",
-      "type": "<one of the allowed entity types>",
+      "type": "<entity type>",
       "description": "<one sentence description, or empty string>"
     }
   ],
@@ -102,15 +102,13 @@ Output format (strict — no markdown, no explanation, no extra keys):
     {
       "src_id": "<id of source entity>",
       "dst_id": "<id of target entity>",
-      "relation": "<one of the allowed relation types>",
+      "relation": "<relation type>",
       "properties": {}
     }
   ]
 }
 
 Rules:
-- Use ONLY the entity types and relation types listed below.
-- If no entities are found, return {"entities": [], "relations": []}.
 - IDs must be lowercase, underscore-separated slugs unique within this response.
 - Relations must reference IDs that appear in the entities list.
 - Do NOT wrap the JSON in a code block or add any text outside the JSON.\
@@ -125,23 +123,39 @@ def extraction_user_prompt(
     """
     Format the user turn for entity/relation extraction.
 
+    When type catalogs are empty (tables not yet populated), falls back to
+    free-form extraction so the LLM is never given an empty constraint list
+    that would cause it to return zero entities.
+
     Args:
         text:           Document text to extract from.
         entity_types:   Rows from graph_entity_types [{name, description}].
         relation_types: Rows from graph_relation_types [{name, description}].
     """
-    entity_lines = "\n".join(
-        f"  - {et['name']}: {et['description']}" for et in entity_types
-    )
-    relation_lines = "\n".join(
-        f"  - {rt['name']}: {rt['description']}" for rt in relation_types
-    )
-    return f"""\
-Allowed entity types:
-{entity_lines}
+    if entity_types:
+        entity_section = "Allowed entity types (use ONLY these):\n" + "\n".join(
+            f"  - {et['name']}: {et['description']}" for et in entity_types
+        )
+    else:
+        entity_section = (
+            "Entity types: no catalog defined — extract any meaningful named entities "
+            "(people, organisations, locations, concepts, products, events, etc.)."
+        )
 
-Allowed relation types:
-{relation_lines}
+    if relation_types:
+        relation_section = "Allowed relation types (use ONLY these):\n" + "\n".join(
+            f"  - {rt['name']}: {rt['description']}" for rt in relation_types
+        )
+    else:
+        relation_section = (
+            "Relation types: no catalog defined — use descriptive UPPER_SNAKE_CASE "
+            "relation names (e.g. WORKS_FOR, LOCATED_IN, PART_OF, RELATED_TO)."
+        )
+
+    return f"""\
+{entity_section}
+
+{relation_section}
 
 Text to extract from:
 \"\"\"
