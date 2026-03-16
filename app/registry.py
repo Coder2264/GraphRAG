@@ -10,16 +10,19 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.implementations.in_memory.embedder import InMemoryEmbedder
+from app.implementations.in_memory.entity_extractor import InMemoryEntityExtractor
 from app.implementations.in_memory.graph_store import InMemoryGraphStore
 from app.implementations.in_memory.llm import InMemoryLLM
 from app.implementations.in_memory.vector_store import InMemoryVectorStore
 from app.implementations.neo4j.graph_store import Neo4jGraphStore
 from app.implementations.ollama.embedder import OllamaEmbedder
+from app.implementations.ollama.entity_extractor import OllamaEntityExtractor
 from app.implementations.ollama.llm import OllamaLLM
 from app.implementations.postgres.vector_store import PostgresVectorStore
 
 if TYPE_CHECKING:
     from app.core.embedder import BaseEmbedder
+    from app.core.entity_extractor import BaseEntityExtractor
     from app.core.graph_store import BaseGraphStore
     from app.core.llm import BaseLLM
     from app.core.vector_store import BaseVectorStore
@@ -59,4 +62,12 @@ GRAPH_STORE_REGISTRY: dict[str, type[BaseGraphStore]] = {
 VECTOR_STORE_REGISTRY: dict[str, type[BaseVectorStore]] = {
     "in_memory": InMemoryVectorStore,
     "postgres":  PostgresVectorStore,
+}
+
+# ------------------------------------------------------------------
+# Entity extractor registry
+# ------------------------------------------------------------------
+ENTITY_EXTRACTOR_REGISTRY: dict[str, type[BaseEntityExtractor]] = {
+    "in_memory": InMemoryEntityExtractor,
+    "ollama":    OllamaEntityExtractor,
 }
