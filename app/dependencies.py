@@ -38,7 +38,10 @@ def set_factory(factory: ServiceFactory) -> None:
 def get_ingestion_service(
     factory: Annotated[ServiceFactory, Depends(get_factory)],
 ) -> IngestionService:
-    return IngestionService(pipeline=factory.get_ingestion_pipeline())
+    return IngestionService(
+        pipeline=factory.get_ingestion_pipeline(),
+        graph_rag_pipeline=factory.get_graph_rag_ingestion_pipeline(),
+    )
 
 
 def get_query_service_for_mode(mode: QueryMode):

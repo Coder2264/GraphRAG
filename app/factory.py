@@ -12,18 +12,21 @@ from typing import Optional
 
 from app.config import settings
 from app.core.embedder import BaseEmbedder
+from app.core.entity_extractor import BaseEntityExtractor
 from app.core.graph_store import BaseGraphStore
 from app.core.ingestion import BaseIngestionPipeline
 from app.core.llm import BaseLLM
 from app.core.retriever import BaseRetriever
 from app.core.vector_store import BaseVectorStore
 from app.implementations.document_processor import DefaultDocumentProcessor
+from app.implementations.graph_rag.ingestion import GraphRAGIngestionPipeline
 from app.implementations.in_memory.ingestion import InMemoryIngestionPipeline
 from app.implementations.in_memory.retrievers import (
     GraphRAGRetriever,
     NoneRetriever,
     RAGRetriever,
 )
+from app.implementations.ollama.entity_extractor import OllamaEntityExtractor
 from app.implementations.rag.ingestion import RAGIngestionPipeline
 from app.models.query import QueryMode
 from app.registry import (
@@ -62,6 +65,7 @@ class ServiceFactory:
         self._embedder: BaseEmbedder | None = None
         self._graph_store: BaseGraphStore | None = None
         self._vector_store: BaseVectorStore | None = None
+        self._entity_extractor: BaseEntityExtractor | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -73,6 +77,7 @@ class ServiceFactory:
         self._embedder = self._build_embedder()
         self._graph_store = self._build_graph_store()
         self._vector_store = self._build_vector_store()
+        self._entity_extractor = self._build_entity_extractor()
 
         await self._graph_store.connect()
         await self._vector_store.connect()
@@ -125,6 +130,22 @@ class ServiceFactory:
             )
         return cls()
 
+    def _build_entity_extractor(self) -> BaseEntityExtractor:
+        """
+        Build the entity extractor.
+
+        Currently always uses OllamaEntityExtractor (same Ollama instance as
+        the LLM).  Extend this method to support other backends.
+        """
+        if self._llm_key == "ollama":
+            return OllamaEntityExtractor(
+                model_name=settings.ollama_llm_model,
+                base_url=settings.ollama_base_url,
+            )
+        # Fallback: import inline to avoid circular dependency at module level
+        from app.implementations.in_memory.entity_extractor import InMemoryEntityExtractor
+        return InMemoryEntityExtractor()
+
     # ------------------------------------------------------------------
     # Service getters (called by FastAPI Depends)
     # ------------------------------------------------------------------
@@ -144,6 +165,24 @@ class ServiceFactory:
             vector_store=self._vector_store,
             graph_store=self._graph_store,
         )
+
+    def get_graph_rag_ingestion_pipeline(self) -> BaseIngestionPipeline | None:
+        """
+        Build the GraphRAG ingestion pipeline if a real graph store is active.
+
+        Returns None when using the in-memory graph store so that
+        IngestionService simply skips the graph branch.
+        """
+        assert self._entity_extractor and self._graph_store
+        if self._graph_store_key == "neo4j":
+            return GraphRAGIngestionPipeline(
+                document_processor=DefaultDocumentProcessor(),
+                entity_extractor=self._entity_extractor,
+                graph_store=self._graph_store,
+                postgres_dsn=settings.postgres_dsn,
+            )
+        # in_memory graph store — skip real extraction
+        return None
 
     def get_retriever(self, mode: QueryMode) -> BaseRetriever:
         assert self._embedder and self._vector_store and self._graph_store

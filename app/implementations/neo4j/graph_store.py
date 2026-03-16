@@ -35,13 +35,42 @@ class Neo4jGraphStore(BaseGraphStore):
     # ------------------------------------------------------------------
 
     async def connect(self) -> None:
-        """Initialise the async Neo4j driver."""
+        """Initialise the async Neo4j driver and ensure schema constraints exist."""
         self._driver = AsyncGraphDatabase.driver(
             self._uri,
             auth=(self._user, self._password),
         )
         # Verify connectivity
         await self._driver.verify_connectivity()
+        # Ensure constraints + indexes exist (idempotent)
+        await self.setup_schema()
+
+    async def setup_schema(self) -> None:
+        """
+        Create Neo4j schema objects required by GraphRAG (idempotent).
+
+        Objects created:
+          - Uniqueness constraint on Entity.id  (prevents duplicate nodes)
+          - Uniqueness constraint on Document.id
+          - Fulltext index `entitySearch` on Entity.name + Entity.description
+            (used by search_nodes for fast keyword lookup)
+        """
+        assert self._driver, "Call connect() first."
+        async with self._driver.session() as session:
+            # Uniqueness constraints — safe to re-run (IF NOT EXISTS)
+            await session.run(
+                "CREATE CONSTRAINT entity_id_unique IF NOT EXISTS "
+                "FOR (e:Entity) REQUIRE e.id IS UNIQUE"
+            )
+            await session.run(
+                "CREATE CONSTRAINT document_id_unique IF NOT EXISTS "
+                "FOR (d:Document) REQUIRE d.id IS UNIQUE"
+            )
+            # Fulltext index for keyword search over entity names/descriptions
+            await session.run(
+                "CREATE FULLTEXT INDEX entitySearch IF NOT EXISTS "
+                "FOR (n:Entity) ON EACH [n.name, n.description]"
+            )
 
     async def close(self) -> None:
         if self._driver:

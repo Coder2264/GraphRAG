@@ -50,6 +50,7 @@ class RAGIngestionPipeline(BaseIngestionPipeline):
         *,
         file_bytes: bytes | None = None,
         filename: str | None = None,
+        doc_id: str | None = None,          # shared UUID from IngestionService
     ) -> str:
         """
         Ingest a document and return its root doc_id.
@@ -62,11 +63,13 @@ class RAGIngestionPipeline(BaseIngestionPipeline):
             metadata:   Metadata to attach to every chunk.
             file_bytes: Raw file bytes (optional, triggers extraction).
             filename:   Original filename (determines extraction strategy).
+            doc_id:     Optional pre-generated UUID (from IngestionService).
+                        When omitted a fresh UUID is generated here.
 
         Returns:
             Root doc_id (UUID string).
         """
-        doc_id = str(uuid.uuid4())
+        doc_id = doc_id or str(uuid.uuid4())
 
         # 1. Extract text (file upload path) or use content directly
         if file_bytes is not None and filename is not None:

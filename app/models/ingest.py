@@ -23,4 +23,5 @@ class IngestResponse(BaseModel):
     doc_id: str = Field(..., description="Unique identifier assigned to the ingested document.")
     message: str = Field("Document ingested successfully.", description="Human-readable status.")
     chunks_count: int = Field(0, description="Number of chunks stored in the vector store.")
+    graph_entities_count: int = Field(0, description="Number of entities extracted into the knowledge graph.")
     metadata: dict = Field(default_factory=dict)
