@@ -173,11 +173,11 @@ class Neo4jGraphStore(BaseGraphStore):
             result = await session.run(
                 """
                 MATCH (n)
-                WHERE any(key IN keys(n) WHERE toLower(toString(n[key])) CONTAINS toLower($query))
+                WHERE any(key IN keys(n) WHERE toLower(toString(n[key])) CONTAINS toLower($search_query))
                 RETURN properties(n) AS props
                 LIMIT $top_k
                 """,
-                query=query,
+                search_query=query,
                 top_k=top_k,
             )
             records = await result.data()
