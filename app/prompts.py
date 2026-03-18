@@ -81,6 +81,136 @@ Answer:\
 
 
 # ===========================================================================
+# GraphRAG Beam-Search — used during iterative graph traversal at query time
+# ===========================================================================
+
+BEAM_SEARCH_SEED_SYSTEM_PROMPT = """\
+You are a keyword extractor for a knowledge graph search engine.
+Given a question and the list of entity types stored in the graph, extract the \
+specific entity names or keywords from the question that are most likely to match \
+nodes in the graph.
+
+Rules:
+- Focus on proper nouns, named entities, and domain-specific terms.
+- Return ONLY a JSON object with a single key "keywords" containing a list of strings.
+- Do NOT wrap the JSON in a code block or add any text outside the JSON.\
+"""
+
+
+def beam_search_seed_user_prompt(question: str, entity_types: list[dict]) -> str:
+    """Format the user turn for seed keyword extraction.
+
+    Args:
+        question:     The user's natural-language question.
+        entity_types: Rows from graph_entity_types [{name, description}].
+    """
+    if entity_types:
+        types_section = "Entity types stored in the graph:\n" + "\n".join(
+            f"  - {et['name']}: {et.get('description', '')}" for et in entity_types
+        )
+    else:
+        types_section = (
+            "Entity types: no catalog defined — extract any meaningful named entities "
+            "(people, organisations, locations, concepts, products, events, etc.)."
+        )
+    return f"""\
+{types_section}
+
+Question: {question}
+
+JSON:\
+"""
+
+
+def beam_search_eval_system_prompt(beam_width: int) -> str:
+    """Build the system prompt for neighbour evaluation.
+
+    Args:
+        beam_width: Maximum number of node IDs to select.
+    """
+    return (
+        "You are navigating a knowledge graph to answer a question.\n"
+        "You are given the current context summary (what has been gathered so far) and a "
+        "list of candidate neighbouring nodes to explore next.\n\n"
+        "Your task:\n"
+        "1. Decide if the current context is already sufficient to answer the question.\n"
+        f"2. If not, select up to {beam_width} candidate node IDs that are most likely to "
+        "lead to the answer.\n\n"
+        "Rules:\n"
+        '- Return ONLY a JSON object: {"has_sufficient_context": true/false, "selected_ids": [...]}\n'
+        "- If has_sufficient_context is true, selected_ids may be empty.\n"
+        "- Do NOT wrap the JSON in a code block or add any text outside the JSON."
+    )
+
+
+def beam_search_eval_user_prompt(
+    question: str,
+    beam_width: int,
+    compressed_summary: str,
+    candidates: list[dict],
+) -> str:
+    """Format the user turn for neighbour evaluation and selection.
+
+    Args:
+        question:           The user's natural-language question.
+        beam_width:         Maximum number of node IDs to select.
+        compressed_summary: Distilled context accumulated so far (empty on first iteration).
+        candidates:         List of candidate nodes as {id, name, type, description}.
+    """
+    summary_section = (
+        f"Current context summary:\n{compressed_summary}"
+        if compressed_summary
+        else "Current context summary: (none yet — first iteration)"
+    )
+    candidates_text = "\n".join(
+        f"  id={c.get('id', '?')}  name={c.get('name', '?')}  "
+        f"type={c.get('type', '?')}  desc={c.get('description', '')}"
+        for c in candidates
+    )
+    return f"""\
+Question: {question}
+
+{summary_section}
+
+Candidate neighbouring nodes (select up to {beam_width}):
+{candidates_text or '(none)'}
+
+JSON:\
+"""
+
+
+BEAM_SEARCH_COMPRESS_SYSTEM_PROMPT = """\
+You are a context distiller for a knowledge graph traversal.
+Given a question and raw graph data (nodes and edges gathered so far), produce a \
+concise natural-language summary that retains ONLY information relevant to \
+answering the question.
+
+Rules:
+- Discard dead-ends and nodes clearly unrelated to the question.
+- Preserve entity names, relationships, and facts that could contribute to the answer.
+- Be concise — prefer bullet points or short sentences over paragraphs.
+- Do not answer the question; only distil the relevant context.\
+"""
+
+
+def beam_search_compress_user_prompt(question: str, raw_context: str) -> str:
+    """Format the user turn for context compression.
+
+    Args:
+        question:    The user's natural-language question.
+        raw_context: Serialised nodes and edges accumulated so far.
+    """
+    return f"""\
+Question: {question}
+
+Raw graph context:
+{raw_context}
+
+Relevant summary:\
+"""
+
+
+# ===========================================================================
 # GraphRAG Extraction — used during ingestion to extract entities + relations
 # ===========================================================================
 

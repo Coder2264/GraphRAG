@@ -36,5 +36,9 @@ class Settings(BaseSettings):
     default_vector_store: str = ""
     default_entity_extractor: str = ""
 
+    # GraphRAG beam-search retriever
+    beam_search_max_iterations: int = 20
+    beam_search_beam_width: int = 8
+
 
 settings = Settings()

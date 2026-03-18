@@ -21,8 +21,8 @@ from app.core.vector_store import BaseVectorStore
 from app.implementations.document_processor import DefaultDocumentProcessor
 from app.implementations.graph_rag.ingestion import GraphRAGIngestionPipeline
 from app.implementations.in_memory.ingestion import InMemoryIngestionPipeline
+from app.implementations.graph_rag.retriever import IterativeGraphRAGRetriever
 from app.implementations.in_memory.retrievers import (
-    GraphRAGRetriever,
     NoneRetriever,
     RAGRetriever,
 )
@@ -196,11 +196,14 @@ class ServiceFactory:
         return None
 
     def get_retriever(self, mode: QueryMode) -> BaseRetriever:
-        assert self._embedder and self._vector_store and self._graph_store
+        assert self._embedder and self._vector_store and self._graph_store and self._llm
         if mode == QueryMode.GRAPHRAG:
-            return GraphRAGRetriever(
+            return IterativeGraphRAGRetriever(
                 graph_store=self._graph_store,
-                embedder=self._embedder,
+                llm=self._llm,
+                postgres_dsn=settings.postgres_dsn,
+                max_iterations=settings.beam_search_max_iterations,
+                beam_width=settings.beam_search_beam_width,
             )
         if mode == QueryMode.RAG:
             return RAGRetriever(
