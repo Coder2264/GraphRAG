@@ -232,7 +232,7 @@ Output format (strict — no markdown, no explanation, no extra keys):
     {
       "src_id": "<id of source entity>",
       "dst_id": "<id of target entity>",
-      "relation": "<relation type>",
+      "relation": "<CANONICAL_TYPE or RAW_RELATION>",
       "properties": {}
     }
   ]
@@ -241,6 +241,10 @@ Output format (strict — no markdown, no explanation, no extra keys):
 Rules:
 - IDs must be lowercase, underscore-separated slugs unique within this response.
 - Relations must reference IDs that appear in the entities list.
+- If an extracted relationship matches one of the allowed relation types, use that canonical name.
+- If no canonical type fits, set "relation" to "RAW_RELATION" and add two keys to "properties":
+    "raw_text": "<the original relationship phrasing from the text>",
+    "canonical": null
 - Do NOT wrap the JSON in a code block or add any text outside the JSON.\
 """
 
@@ -273,13 +277,19 @@ def extraction_user_prompt(
         )
 
     if relation_types:
-        relation_section = "Allowed relation types (use ONLY these):\n" + "\n".join(
-            f"  - {rt['name']}: {rt['description']}" for rt in relation_types
+        relation_section = (
+            "Allowed relation types — prefer these canonical names:\n"
+            + "\n".join(f"  - {rt['name']}: {rt['description']}" for rt in relation_types)
+            + "\n\nIf a relationship does not match any canonical type, set "
+            '"relation" to "RAW_RELATION" and add '
+            '"raw_text": "<original phrasing>" and "canonical": null to "properties".'
         )
     else:
         relation_section = (
             "Relation types: no catalog defined — use descriptive UPPER_SNAKE_CASE "
-            "relation names (e.g. WORKS_FOR, LOCATED_IN, PART_OF, RELATED_TO)."
+            "relation names (e.g. WORKS_AT, LOCATED_IN, PART_OF). "
+            "If none fits, use RAW_RELATION with "
+            '"raw_text": "<original phrasing>" and "canonical": null in properties.'
         )
 
     return f"""\

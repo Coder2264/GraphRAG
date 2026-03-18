@@ -175,6 +175,13 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
         for rel in relations:
             src_local = rel.get("src_id", "")
             dst_local = rel.get("dst_id", "")
+            # Guard against malformed LLM output (e.g. list instead of string)
+            if not isinstance(src_local, str) or not isinstance(dst_local, str):
+                logger.warning(
+                    "GraphRAG [%s]: skipping relation with non-string src_id/dst_id: %r",
+                    doc_id, rel,
+                )
+                continue
             relation_type = rel.get("relation", "RELATED_TO")
             if src_local not in entity_id_map or dst_local not in entity_id_map:
                 continue

@@ -149,7 +149,8 @@ class Neo4jGraphStore(BaseGraphStore):
                        COLLECT(DISTINCT {{
                            src:      startNode(r).id,
                            dst:      endNode(r).id,
-                           relation: type(r)
+                           relation: type(r),
+                           raw_text: r.raw_text
                        }}) AS edges
                 """,
                 node_id=node_id,

@@ -68,20 +68,36 @@ CREATE TABLE IF NOT EXISTS graph_relation_types (
 );
 
 -- ----------------------------------------------------------------
--- Seed: 5 domain-relevant examples (edit as needed for your domain)
+-- Seed: domain entity types (edit as needed for your domain)
 -- ----------------------------------------------------------------
 INSERT INTO graph_entity_types (name, description) VALUES
-  ('Person',       'A human individual mentioned in the text'),
-  ('Organization', 'A company, institution, or formal group'),
-  ('Regulation',   'A law, rule, policy, or compliance requirement'),
-  ('Product',      'A software product, tool, or service'),
-  ('Location',     'A place, region, country, or geographic entity')
+  ('Person',        'A human individual mentioned in the text'),
+  ('Organization',  'A formal group, institution, or non-profit'),
+  ('Location',      'A place, region, country, or geographic entity'),
+  ('Event',         'A happening, occurrence, or incident with a time and place'),
+  ('Product',       'A software product, tool, hardware device, or service offering'),
+  ('Concept',       'An abstract idea, theory, methodology, or domain term'),
+  ('ResearchPaper', 'An academic publication, preprint, or technical report'),
+  ('Company',       'A commercial business or corporation'),
+  ('Disease',       'A medical condition, illness, disorder, or syndrome'),
+  ('Chemical',      'A chemical compound, element, drug, or molecular entity')
 ON CONFLICT (name) DO NOTHING;
 
+-- ----------------------------------------------------------------
+-- Seed: canonical relation types.
+-- If an extracted relation does not match any of these types the
+-- LLM must use RAW_RELATION (see extraction prompt) so no
+-- information is silently discarded.
+-- ----------------------------------------------------------------
 INSERT INTO graph_relation_types (name, description) VALUES
-  ('WORKS_FOR',    'A person is employed by or works for an organization'),
-  ('GOVERNS',      'A regulation governs or applies to an entity'),
-  ('LOCATED_IN',   'An entity is located in or associated with a place'),
-  ('PRODUCES',     'An organization produces or develops a product'),
-  ('RELATED_TO',   'A generic catch-all relationship between two entities')
+  ('WORKS_AT',          'A person works at or is employed by an organization or company'),
+  ('STUDIED_AT',        'A person studied or received a degree at an institution'),
+  ('LOCATED_IN',        'An entity is physically located in or belongs to a place'),
+  ('PART_OF',           'An entity is a component, member, or subset of another entity'),
+  ('CEO_OF',            'A person is the chief executive officer of a company or organization'),
+  ('COLLABORATES_WITH', 'Two entities work together or have a partnership'),
+  ('OWNS',              'An entity owns, holds, or controls another entity'),
+  ('FOUNDED_BY',        'An organization or project was founded or created by a person'),
+  ('REPORTS_TO',        'A person or unit reports to another person or unit in a hierarchy'),
+  ('HEADQUARTERED_IN',  'A company or organization is headquartered in a location')
 ON CONFLICT (name) DO NOTHING;

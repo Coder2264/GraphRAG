@@ -288,10 +288,16 @@ class IterativeGraphRAGRetriever(BaseRetriever):
             f"type={n.get('type', '?')}  desc={n.get('description', '')}"
             for n in nodes
         ]
-        edge_lines = [
-            f"{e.get('src', '?')} --[{e.get('relation', '?')}]--> {e.get('dst', '?')}"
-            for e in edges
-        ]
+        edge_lines = []
+        for e in edges:
+            src = e.get("src", "?")
+            dst = e.get("dst", "?")
+            rel = e.get("relation", "?")
+            if rel == "RAW_RELATION":
+                raw_text = e.get("raw_text") or "?"
+                edge_lines.append(f'{src} --["{raw_text}"]--> {dst}')
+            else:
+                edge_lines.append(f"{src} --[{rel}]--> {dst}")
         parts = []
         if node_lines:
             parts.append("Nodes:\n" + "\n".join(node_lines))
