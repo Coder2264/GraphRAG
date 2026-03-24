@@ -94,3 +94,16 @@ class InMemoryGraphStore(BaseGraphStore):
     async def delete_node(self, node_id: str) -> None:
         self._nodes.pop(node_id, None)
         self._edges = [e for e in self._edges if e["src"] != node_id and e["dst"] != node_id]
+
+    async def delete_nodes_by_doc_id(self, doc_id: str) -> None:
+        """Delete all nodes with the given doc_id property and their edges."""
+        to_delete = {
+            nid for nid, props in self._nodes.items()
+            if props.get("doc_id") == doc_id
+        }
+        for nid in to_delete:
+            self._nodes.pop(nid, None)
+        self._edges = [
+            e for e in self._edges
+            if e["src"] not in to_delete and e["dst"] not in to_delete
+        ]
