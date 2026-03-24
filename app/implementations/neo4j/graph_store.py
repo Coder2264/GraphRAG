@@ -197,3 +197,12 @@ class Neo4jGraphStore(BaseGraphStore):
                 "MATCH (n {id: $node_id}) DETACH DELETE n",
                 node_id=node_id,
             )
+
+    async def delete_nodes_by_doc_id(self, doc_id: str) -> None:
+        """Delete all nodes with the given doc_id property and their relationships."""
+        assert self._driver, "Call connect() first."
+        async with self._driver.session(database=self._database) as session:
+            await session.run(
+                "MATCH (n {doc_id: $doc_id}) DETACH DELETE n",
+                doc_id=doc_id,
+            )

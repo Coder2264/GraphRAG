@@ -232,6 +232,11 @@ Rules:
 - If no canonical name fits, set "relation" to "RAW_RELATION" and add two keys to "properties":
     "raw_text": "<the original relationship phrasing from the text>",
     "canonical": null
+- CONNECTIVITY: The extracted entities and relations MUST form a single connected graph
+  when treated as undirected (every entity reachable from every other via relationships).
+- Every entity MUST participate in at least one relation with another extracted entity.
+- Do NOT include isolated entities that have no relationship with any other entity.
+- If an entity cannot be naturally connected to the main graph through the text, omit it.
 - Do NOT wrap the JSON in a code block or add any text outside the JSON.\
 """
 
