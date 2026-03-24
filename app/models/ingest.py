@@ -15,6 +15,10 @@ class IngestRequest(BaseModel):
     content: str = Field(..., description="Raw text / document content to ingest.")
     metadata: dict = Field(default_factory=dict, description="Arbitrary key-value metadata.")
     source: Optional[str] = Field(None, description="Optional source identifier (URL, file path, etc.)")
+    processing_instruction: str = Field(
+        "",
+        description="Optional free-text instruction guiding entity/relation extraction (e.g. domain, focus).",
+    )
 
 
 class IngestResponse(BaseModel):

@@ -2,7 +2,7 @@
 IterativeGraphRAGRetriever — beam-search graph traversal guided by the LLM.
 
 Implements the Think-on-Graph (ToG) algorithm:
-  1. LLM extracts seed keywords from the question (grounded by the entity-type catalog).
+  1. LLM extracts seed keywords from the question.
   2. Seed keywords are resolved to graph node IDs via search_nodes().
   3. Iterative loop (up to max_iterations):
        a. Expand depth-1 neighbours of every frontier node.
@@ -20,7 +20,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import asyncpg
 from pydantic import BaseModel, Field
 
 from app.core.graph_store import BaseGraphStore
@@ -66,7 +65,6 @@ class IterativeGraphRAGRetriever(BaseRetriever):
         graph_store:    Any BaseGraphStore backend (e.g. Neo4jGraphStore).
         llm:            Any BaseLLM backend used for seed extraction, evaluation,
                         and context compression.
-        postgres_dsn:   DSN for the Postgres DB that holds graph_entity_types.
         max_iterations: Hard cap on the number of expansion steps (default 20).
         beam_width:     Maximum nodes to keep in the frontier per iteration (default 8).
     """
@@ -75,13 +73,11 @@ class IterativeGraphRAGRetriever(BaseRetriever):
         self,
         graph_store: BaseGraphStore,
         llm: BaseLLM,
-        postgres_dsn: str,
         max_iterations: int = 20,
         beam_width: int = 8,
     ) -> None:
         self._graph_store = graph_store
         self._llm = llm
-        self._postgres_dsn = postgres_dsn
         self._max_iterations = max_iterations
         self._beam_width = beam_width
 
@@ -103,8 +99,7 @@ class IterativeGraphRAGRetriever(BaseRetriever):
         logger.info("IterativeGraphRAGRetriever: starting for query=%r", query)
 
         # ---- Step 0: seed extraction ----------------------------------------
-        entity_types = await self._fetch_entity_types()
-        keywords = await self._extract_seeds(query, entity_types)
+        keywords = await self._extract_seeds(query)
         logger.info("Beam search seeds: keywords=%s", keywords)
 
         # Resolve keywords → node IDs
@@ -208,31 +203,13 @@ class IterativeGraphRAGRetriever(BaseRetriever):
     # Private helpers
     # ------------------------------------------------------------------
 
-    async def _fetch_entity_types(self) -> list[dict[str, str]]:
-        """Fetch active entity types from Postgres to ground seed extraction."""
-        try:
-            conn = await asyncpg.connect(self._postgres_dsn)
-            try:
-                rows = await conn.fetch(
-                    "SELECT name, description FROM graph_entity_types "
-                    "WHERE is_active = TRUE ORDER BY id;"
-                )
-                return [dict(r) for r in rows]
-            finally:
-                await conn.close()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Could not load entity types from Postgres: %s", exc)
-            return []
-
-    async def _extract_seeds(
-        self, question: str, entity_types: list[dict[str, str]]
-    ) -> list[str]:
+    async def _extract_seeds(self, question: str) -> list[str]:
         """Ask the LLM to extract entity keywords from the question.
 
         Falls back to a single keyword equal to the full question if the LLM
         returns an empty list (e.g. structured output parsing failed).
         """
-        prompt = beam_search_seed_user_prompt(question, entity_types)
+        prompt = beam_search_seed_user_prompt(question)
         result: _SeedResult = await self._llm.generate_structured(
             prompt=prompt,
             response_model=_SeedResult,

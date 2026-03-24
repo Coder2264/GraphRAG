@@ -86,9 +86,8 @@ Answer:\
 
 BEAM_SEARCH_SEED_SYSTEM_PROMPT = """\
 You are a keyword extractor for a knowledge graph search engine.
-Given a question and the list of entity types stored in the graph, extract the \
-specific entity names or keywords from the question that are most likely to match \
-nodes in the graph.
+Extract the specific entity names or keywords from the question that are most \
+likely to match nodes in the graph.
 
 Rules:
 - Focus on proper nouns, named entities, and domain-specific terms.
@@ -97,25 +96,13 @@ Rules:
 """
 
 
-def beam_search_seed_user_prompt(question: str, entity_types: list[dict]) -> str:
+def beam_search_seed_user_prompt(question: str) -> str:
     """Format the user turn for seed keyword extraction.
 
     Args:
-        question:     The user's natural-language question.
-        entity_types: Rows from graph_entity_types [{name, description}].
+        question: The user's natural-language question.
     """
-    if entity_types:
-        types_section = "Entity types stored in the graph:\n" + "\n".join(
-            f"  - {et['name']}: {et.get('description', '')}" for et in entity_types
-        )
-    else:
-        types_section = (
-            "Entity types: no catalog defined — extract any meaningful named entities "
-            "(people, organisations, locations, concepts, products, events, etc.)."
-        )
     return f"""\
-{types_section}
-
 Question: {question}
 
 JSON:\
@@ -232,7 +219,7 @@ Output format (strict — no markdown, no explanation, no extra keys):
     {
       "src_id": "<id of source entity>",
       "dst_id": "<id of target entity>",
-      "relation": "<CANONICAL_TYPE or RAW_RELATION>",
+      "relation": "<UPPER_SNAKE_CASE relation type, or RAW_RELATION>",
       "properties": {}
     }
   ]
@@ -241,61 +228,38 @@ Output format (strict — no markdown, no explanation, no extra keys):
 Rules:
 - IDs must be lowercase, underscore-separated slugs unique within this response.
 - Relations must reference IDs that appear in the entities list.
-- If an extracted relationship matches one of the allowed relation types, use that canonical name.
-- If no canonical type fits, set "relation" to "RAW_RELATION" and add two keys to "properties":
+- Use descriptive UPPER_SNAKE_CASE relation names (e.g. WORKS_AT, LOCATED_IN, PART_OF).
+- If no canonical name fits, set "relation" to "RAW_RELATION" and add two keys to "properties":
     "raw_text": "<the original relationship phrasing from the text>",
     "canonical": null
 - Do NOT wrap the JSON in a code block or add any text outside the JSON.\
 """
 
 
-def extraction_user_prompt(
-    text: str,
-    entity_types: list[dict],
-    relation_types: list[dict],
-) -> str:
+def extraction_user_prompt(text: str, processing_instruction: str = "") -> str:
     """
     Format the user turn for entity/relation extraction.
 
-    When type catalogs are empty (tables not yet populated), falls back to
-    free-form extraction so the LLM is never given an empty constraint list
-    that would cause it to return zero entities.
-
     Args:
-        text:           Document text to extract from.
-        entity_types:   Rows from graph_entity_types [{name, description}].
-        relation_types: Rows from graph_relation_types [{name, description}].
+        text:                   Document text to extract from.
+        processing_instruction: Optional free-text hint guiding extraction
+                                (e.g. domain, entity types to focus on).
     """
-    if entity_types:
-        entity_section = "Allowed entity types (use ONLY these):\n" + "\n".join(
-            f"  - {et['name']}: {et['description']}" for et in entity_types
+    if processing_instruction:
+        instruction_section = (
+            f"Processing instruction: {processing_instruction}\n"
+            "Use this instruction to focus your extraction on the most relevant "
+            "entities and relationships for the described domain or purpose."
         )
     else:
-        entity_section = (
-            "Entity types: no catalog defined — extract any meaningful named entities "
-            "(people, organisations, locations, concepts, products, events, etc.)."
-        )
-
-    if relation_types:
-        relation_section = (
-            "Allowed relation types — prefer these canonical names:\n"
-            + "\n".join(f"  - {rt['name']}: {rt['description']}" for rt in relation_types)
-            + "\n\nIf a relationship does not match any canonical type, set "
-            '"relation" to "RAW_RELATION" and add '
-            '"raw_text": "<original phrasing>" and "canonical": null to "properties".'
-        )
-    else:
-        relation_section = (
-            "Relation types: no catalog defined — use descriptive UPPER_SNAKE_CASE "
-            "relation names (e.g. WORKS_AT, LOCATED_IN, PART_OF). "
-            "If none fits, use RAW_RELATION with "
-            '"raw_text": "<original phrasing>" and "canonical": null in properties.'
+        instruction_section = (
+            "No specific instruction provided — extract all meaningful named entities "
+            "(people, organisations, locations, concepts, products, events, etc.) "
+            "and their relationships."
         )
 
     return f"""\
-{entity_section}
-
-{relation_section}
+{instruction_section}
 
 Text to extract from:
 \"\"\"

@@ -1,9 +1,9 @@
 """
 Abstract interface for entity extraction from text.
 
-Implementors receive a chunk of text along with the domain-specific entity
-and relation types (loaded from Postgres at runtime) and return a structured
-dict of extracted entities and relations ready to be persisted to Neo4j.
+Implementors receive a chunk of text and an optional free-text
+processing_instruction, and return a structured dict of extracted entities
+and relations ready to be persisted to Neo4j.
 """
 
 from __future__ import annotations
@@ -15,25 +15,24 @@ class BaseEntityExtractor(ABC):
     """
     Contract for any LLM-backed entity/relationship extractor.
 
-    The caller supplies the allowed entity and relation type catalogs so the
-    implementation can embed them into its prompt.  This keeps the extractor
-    decoupled from the database layer.
+    The caller supplies a free-text processing_instruction that guides what
+    to extract (domain, entity focus, etc.).  This keeps the extractor
+    decoupled from any database catalog layer.
     """
 
     @abstractmethod
     async def extract(
         self,
         text: str,
-        entity_types: list[dict],   # [{"name": str, "description": str}, ...]
-        relation_types: list[dict], # [{"name": str, "description": str}, ...]
+        processing_instruction: str = "",
     ) -> dict:
         """
         Extract entities and relationships from *text*.
 
         Args:
-            text:           The document text (or chunk) to analyse.
-            entity_types:   Allowed entity type descriptors from Postgres.
-            relation_types: Allowed relation type descriptors from Postgres.
+            text:                   The document text (or chunk) to analyse.
+            processing_instruction: Optional free-text hint guiding extraction
+                                    (e.g. domain, entity types to focus on).
 
         Returns:
             A dict with two keys:

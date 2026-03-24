@@ -63,6 +63,10 @@ async def ingest_file(
     service: Annotated[IngestionService, Depends(get_ingestion_service)],
     file: UploadFile = File(..., description="PDF or TXT file to ingest."),
     source: Optional[str] = Form(None, description="Optional source label (URL, path, etc.)."),
+    processing_instruction: str = Form(
+        "",
+        description="Optional free-text instruction guiding entity/relation extraction (e.g. 'Extract people, companies, and funding relationships').",
+    ),
 ) -> IngestResponse:
     allowed = {"pdf", "txt"}
     ext = (file.filename or "").rsplit(".", 1)[-1].lower()
@@ -84,6 +88,7 @@ async def ingest_file(
         file_bytes=file_bytes,
         filename=file.filename or "upload",
         metadata=metadata,
+        processing_instruction=processing_instruction,
     )
     logger.info(
         "Ingest complete — file=%s  doc_id=%s  chunks=%d  graph_entities=%d",

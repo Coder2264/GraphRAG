@@ -62,6 +62,7 @@ class IngestionService:
         doc_id, chunks_count, entities_count = await self._run_parallel(
             content=request.content,
             metadata=metadata,
+            processing_instruction=request.processing_instruction,
         )
 
         return IngestResponse(
@@ -77,14 +78,16 @@ class IngestionService:
         file_bytes: bytes,
         filename: str,
         metadata: dict[str, Any] | None = None,
+        processing_instruction: str = "",
     ) -> IngestResponse:
         """
         Ingest a document from an uploaded file (PDF or TXT).
 
         Args:
-            file_bytes: Raw bytes of the uploaded file.
-            filename:   Original filename (determines extraction strategy).
-            metadata:   Optional caller-supplied metadata.
+            file_bytes:             Raw bytes of the uploaded file.
+            filename:               Original filename (determines extraction strategy).
+            metadata:               Optional caller-supplied metadata.
+            processing_instruction: Optional free-text hint guiding entity extraction.
 
         Returns:
             IngestResponse with doc_id, chunks_count, graph_entities_count.
@@ -96,6 +99,7 @@ class IngestionService:
             metadata=meta,
             file_bytes=file_bytes,
             filename=filename,
+            processing_instruction=processing_instruction,
         )
 
         return IngestResponse(
@@ -116,6 +120,7 @@ class IngestionService:
         metadata: dict[str, Any],
         file_bytes: bytes | None = None,
         filename: str | None = None,
+        processing_instruction: str = "",
     ) -> tuple[str, int, int]:
         """
         Run RAG and GraphRAG pipelines (if present) in parallel.
@@ -153,6 +158,7 @@ class IngestionService:
                 file_bytes=file_bytes,
                 filename=filename,
                 doc_id=shared_doc_id,
+                processing_instruction=processing_instruction,
             )
             rag_result, _ = await asyncio.gather(rag_coro, graph_coro)
             entities_count = getattr(

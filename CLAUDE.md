@@ -113,3 +113,6 @@ Critical: The embedding model used at ingest **must match** the model used at qu
 | Graph Store | `neo4j` | `Neo4jGraphStore` |
 | Graph Store | `in_memory` | `InMemoryGraphStore` (stub) |
 | Entity Extractor | (auto) | `OllamaEntityExtractor` (when LLM=ollama) |
+
+# To Ignore
+- All files under Tests/ - this contains files for uploading and manually testing. Don't read it

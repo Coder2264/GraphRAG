@@ -155,6 +155,11 @@ class ServiceFactory:
                 model_name=settings.ollama_llm_model,
                 base_url=settings.ollama_base_url,
             )
+        if self._entity_extractor_key == "gemini":
+            return cls(  # type: ignore[call-arg]
+                api_key=settings.gemini_api_key,
+                model_name=settings.gemini_extraction_model,
+            )
         return cls()
 
     # ------------------------------------------------------------------
@@ -190,7 +195,6 @@ class ServiceFactory:
                 document_processor=DefaultDocumentProcessor(),
                 entity_extractor=self._entity_extractor,
                 graph_store=self._graph_store,
-                postgres_dsn=settings.postgres_dsn,
             )
         # in_memory graph store — skip real extraction
         return None
@@ -201,7 +205,6 @@ class ServiceFactory:
             return IterativeGraphRAGRetriever(
                 graph_store=self._graph_store,
                 llm=self._llm,
-                postgres_dsn=settings.postgres_dsn,
                 max_iterations=settings.beam_search_max_iterations,
                 beam_width=settings.beam_search_beam_width,
             )

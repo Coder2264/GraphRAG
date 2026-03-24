@@ -16,7 +16,6 @@ class InMemoryEntityExtractor(BaseEntityExtractor):
     async def extract(
         self,
         text: str,
-        entity_types: list[dict],
-        relation_types: list[dict],
+        processing_instruction: str = "",
     ) -> dict:
         return {"entities": [], "relations": []}
