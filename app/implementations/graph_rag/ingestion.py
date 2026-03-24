@@ -3,11 +3,10 @@ GraphRAGIngestionPipeline — BaseIngestionPipeline for the GraphRAG path.
 
 Pipeline:
   1. Extract plain text from the document (same as RAG)
-  2. Load entity and relation type catalogs from Postgres
-  3. Call BaseEntityExtractor to extract entities + relations from the text
-  4. Persist each entity as a Neo4j node (:Entity + type label)
-  5. Persist each relation as a Neo4j edge
-  6. Create a :Document root node and link it to all extracted entities
+  2. Call BaseEntityExtractor to extract entities + relations from the text
+  3. Persist each entity as a Neo4j node (:Entity + type label)
+  4. Persist each relation as a Neo4j edge
+  5. Create a :Document root node and link it to all extracted entities
 
 SRP: Only owns the graph ingestion concern.
 DIP: Depends on BaseEntityExtractor, BaseDocumentProcessor, BaseGraphStore.
@@ -18,8 +17,6 @@ from __future__ import annotations
 import logging
 import uuid
 from typing import Any
-
-import asyncpg
 
 from app.core.document_processor import BaseDocumentProcessor
 from app.core.entity_extractor import BaseEntityExtractor
@@ -42,9 +39,12 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
             document_processor=...,
             entity_extractor=...,
             graph_store=...,
-            postgres_dsn=settings.postgres_dsn,
         )
-        doc_id = await pipeline.ingest(content="", metadata={}, file_bytes=b"...", filename="report.pdf")
+        doc_id = await pipeline.ingest(
+            content="", metadata={},
+            file_bytes=b"...", filename="report.pdf",
+            processing_instruction="Extract people, companies, and funding relationships.",
+        )
     """
 
     def __init__(
@@ -52,12 +52,10 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
         document_processor: BaseDocumentProcessor,
         entity_extractor: BaseEntityExtractor,
         graph_store: BaseGraphStore,
-        postgres_dsn: str,
     ) -> None:
         self._processor = document_processor
         self._extractor = entity_extractor
         self._graph_store = graph_store
-        self._postgres_dsn = postgres_dsn
 
         # Set after ingest() for the service to read
         self._last_entities_count: int = 0
@@ -73,7 +71,8 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
         *,
         file_bytes: bytes | None = None,
         filename: str | None = None,
-        doc_id: str | None = None,     # accept shared doc_id from parallel call
+        doc_id: str | None = None,
+        processing_instruction: str = "",
     ) -> str:
         """
         Extract entities/relations and store them in Neo4j.
@@ -101,16 +100,9 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
             self._last_entities_count = 0
             return doc_id
 
-        # 2. Load type catalogs from Postgres
-        entity_types, relation_types = await self._load_type_catalogs()
-        logger.info(
-            "GraphRAG [%s]: loaded %d entity types, %d relation types",
-            doc_id, len(entity_types), len(relation_types),
-        )
-
-        # 3. Extract entities + relations via LLM
+        # 2. Extract entities + relations via LLM
         logger.info("GraphRAG [%s]: starting entity extraction (text length=%d chars)", doc_id, len(text))
-        extraction = await self._extractor.extract(text, entity_types, relation_types)
+        extraction = await self._extractor.extract(text, processing_instruction)
         entities: list[dict] = extraction.get("entities", [])
         relations: list[dict] = extraction.get("relations", [])
 
@@ -175,6 +167,13 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
         for rel in relations:
             src_local = rel.get("src_id", "")
             dst_local = rel.get("dst_id", "")
+            # Guard against malformed LLM output (e.g. list instead of string)
+            if not isinstance(src_local, str) or not isinstance(dst_local, str):
+                logger.warning(
+                    "GraphRAG [%s]: skipping relation with non-string src_id/dst_id: %r",
+                    doc_id, rel,
+                )
+                continue
             relation_type = rel.get("relation", "RELATED_TO")
             if src_local not in entity_id_map or dst_local not in entity_id_map:
                 continue
@@ -195,38 +194,3 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
     async def delete(self, doc_id: str) -> None:
         """Delete the Document node and all entities linked to it."""
         await self._graph_store.delete_node(doc_id)
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    async def _load_type_catalogs(
-        self,
-    ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
-        """
-        Fetch active entity and relation types from Postgres.
-
-        Falls back to empty lists if the table doesn't exist yet or the DB
-        is unreachable — the extractor will still run with generic types.
-        """
-        try:
-            conn = await asyncpg.connect(self._postgres_dsn)
-            try:
-                entity_rows = await conn.fetch(
-                    "SELECT name, description FROM graph_entity_types "
-                    "WHERE is_active = TRUE ORDER BY id;"
-                )
-                relation_rows = await conn.fetch(
-                    "SELECT name, description FROM graph_relation_types "
-                    "WHERE is_active = TRUE ORDER BY id;"
-                )
-                entity_types = [dict(r) for r in entity_rows]
-                relation_types = [dict(r) for r in relation_rows]
-            finally:
-                await conn.close()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Could not load type catalogs from Postgres: %s", exc)
-            entity_types = []
-            relation_types = []
-
-        return entity_types, relation_types

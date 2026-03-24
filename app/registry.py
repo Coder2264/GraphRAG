@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from app.implementations.gemini.entity_extractor import GeminiEntityExtractor
 from app.implementations.in_memory.embedder import InMemoryEmbedder
 from app.implementations.in_memory.entity_extractor import InMemoryEntityExtractor
 from app.implementations.in_memory.graph_store import InMemoryGraphStore
@@ -70,4 +71,5 @@ VECTOR_STORE_REGISTRY: dict[str, type[BaseVectorStore]] = {
 ENTITY_EXTRACTOR_REGISTRY: dict[str, type[BaseEntityExtractor]] = {
     "in_memory": InMemoryEntityExtractor,
     "ollama":    OllamaEntityExtractor,
+    "gemini":    GeminiEntityExtractor,
 }

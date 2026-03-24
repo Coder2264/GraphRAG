@@ -40,17 +40,20 @@ class OllamaEntityExtractor(BaseEntityExtractor):
     async def extract(
         self,
         text: str,
-        entity_types: list[dict],
-        relation_types: list[dict],
+        processing_instruction: str = "",
     ) -> dict:
         """
         Call Ollama to extract entities and relations from *text*.
+
+        Args:
+            text:                   The document text to analyse.
+            processing_instruction: Optional free-text hint guiding extraction.
 
         Returns:
             {"entities": [...], "relations": [...]}
             Empty lists on any error (graceful degradation).
         """
-        user_msg = extraction_user_prompt(text, entity_types, relation_types)
+        user_msg = extraction_user_prompt(text, processing_instruction)
 
         payload = {
             "model": self._model,
