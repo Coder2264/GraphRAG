@@ -2,12 +2,16 @@
 GraphRAGIngestionPipeline — BaseIngestionPipeline for the GraphRAG path.
 
 Pipeline:
-  1. Extract plain text from the document (same as RAG)
-  2. Call BaseEntityExtractor to extract entities + relations from the text
+  1. Extract plain text from the document (same as RAG).
+     The FULL document text is passed to the entity extractor as a single
+     piece — it is never split into chunks.  Chunking is a RAG-only concern;
+     entity extraction needs global document context to produce a coherent,
+     connected knowledge graph.
+  2. Call BaseEntityExtractor to extract entities + relations from the text.
   3. Filter entities and relations to the largest connected component
-     (isolated entities are dropped so the persisted graph is always connected)
-  4. Persist each entity as a Neo4j node (:Entity + type label)
-  5. Persist each relation as a Neo4j edge
+     (isolated entities are dropped so the persisted graph is always connected).
+  4. Persist each entity as a Neo4j node (:Entity + type label).
+  5. Persist each relation as a Neo4j edge.
 
 No Document root node is created; entities are linked only through their
 own extracted relationships.  The doc_id is stored as a property on every
@@ -87,6 +91,11 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
         """
         Extract entities/relations and store them in Neo4j.
 
+        The entire document text is passed to the entity extractor as a
+        single unit — no chunking is performed.  Chunking is a RAG-only
+        concern; splitting the text here would fragment entity context and
+        produce disconnected graphs.
+
         Args:
             content:    Raw text (used when file_bytes is not provided).
             metadata:   Metadata; at minimum should contain "source".
@@ -99,7 +108,9 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
         """
         doc_id = doc_id or str(uuid.uuid4())
 
-        # 1. Extract text
+        # 1. Extract full document text — never chunked for GraphRAG.
+        # chunk_text() is intentionally NOT called here; the extractor needs
+        # the complete document to reason about entity relationships globally.
         if file_bytes is not None and filename is not None:
             text = await self._processor.extract_text(file_bytes, filename)
         else:
