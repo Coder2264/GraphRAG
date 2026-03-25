@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     ollama_base_url: str = ""
     ollama_llm_model: str = ""
     ollama_embed_model: str = ""
+    ollama_extraction_timeout: float = 600.0  # seconds; large docs need >2 min
 
     # Embedding
     embedding_dim: int = 0

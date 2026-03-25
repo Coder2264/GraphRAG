@@ -15,6 +15,7 @@ from typing import Any
 
 import httpx
 
+from app.config import settings
 from app.core.entity_extractor import BaseEntityExtractor
 from app.prompts import EXTRACTION_SYSTEM_PROMPT, extraction_user_prompt
 
@@ -70,7 +71,7 @@ class OllamaEntityExtractor(BaseEntityExtractor):
         }
 
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            async with httpx.AsyncClient(timeout=settings.ollama_extraction_timeout) as client:
                 response = await client.post(
                     f"{self._base_url}/api/chat",
                     json=payload,
@@ -82,7 +83,7 @@ class OllamaEntityExtractor(BaseEntityExtractor):
             return self._parse_response(raw)
 
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Entity extraction failed: %s", exc)
+            logger.warning("Entity extraction failed: %s: %s", type(exc).__name__, exc)
             return {"entities": [], "relations": []}
 
     # ------------------------------------------------------------------

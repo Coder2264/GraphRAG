@@ -88,7 +88,8 @@ class Neo4jGraphStore(BaseGraphStore):
     async def add_node(self, node_id: str, labels: list[str], data: dict[str, Any]) -> None:
         """MERGE a node by its id property, set labels and properties."""
         assert self._driver, "Call connect() first."
-        label_str = ":".join(labels) if labels else "Node"
+        escaped = [f"`{lbl.replace('`', '')}`" for lbl in labels] if labels else ["`Node`"]
+        label_str = ":".join(escaped)
         async with self._driver.session(database=self._database) as session:
             await session.run(
                 f"""
@@ -108,11 +109,12 @@ class Neo4jGraphStore(BaseGraphStore):
     ) -> None:
         """MERGE a directed relationship between two nodes."""
         assert self._driver, "Call connect() first."
+        escaped_rel = f"`{relation.replace('`', '')}`"
         async with self._driver.session(database=self._database) as session:
             await session.run(
                 f"""
                 MATCH (a {{id: $src_id}}), (b {{id: $dst_id}})
-                MERGE (a)-[r:{relation}]->(b)
+                MERGE (a)-[r:{escaped_rel}]->(b)
                 SET r += $props
                 """,
                 src_id=src_id,
