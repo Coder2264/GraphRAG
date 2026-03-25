@@ -104,13 +104,16 @@ class IterativeGraphRAGRetriever(BaseRetriever):
 
         # Resolve keywords → node IDs
         frontier: set[str] = set()
+        id_to_name: dict[str, str] = {}
         for kw in keywords:
             nodes = await self._graph_store.search_nodes(kw, top_k=top_k)
             for n in nodes:
                 nid = n.get("id")
                 if nid:
                     frontier.add(nid)
-        logger.info("Beam search: initial frontier size=%d", len(frontier))
+                    id_to_name[nid] = n.get("name", nid)
+        frontier_names = [id_to_name.get(nid, nid) for nid in frontier]
+        logger.info("Beam search: initial frontier size=%d  nodes=%s", len(frontier), frontier_names)
 
         if not frontier:
             logger.warning("Beam search: no seed nodes found — returning empty context")
@@ -131,6 +134,9 @@ class IterativeGraphRAGRetriever(BaseRetriever):
                 logger.info("Beam search: frontier empty at iteration %d — stopping", iteration)
                 break
 
+            frontier_names = [id_to_name.get(nid, nid) for nid in frontier]
+            logger.info("Beam search iteration %d: frontier=%s", iteration, frontier_names)
+
             # Expand all frontier nodes (skip already visited)
             raw_nodes: list[dict[str, Any]] = []
             raw_edges: list[dict[str, Any]] = []
@@ -147,12 +153,14 @@ class IterativeGraphRAGRetriever(BaseRetriever):
                 iteration, len(frontier), len(raw_nodes),
             )
 
-            # Accumulate unique nodes
+            # Accumulate unique nodes and update name map
             for n in raw_nodes:
                 nid = n.get("id")
-                if nid and nid not in seen_node_ids:
-                    all_nodes.append(n)
-                    seen_node_ids.add(nid)
+                if nid:
+                    id_to_name[nid] = n.get("name", nid)
+                    if nid not in seen_node_ids:
+                        all_nodes.append(n)
+                        seen_node_ids.add(nid)
             all_edges.extend(raw_edges)
 
             # Build slim candidate list for the LLM (id, name, type, description only)
@@ -168,9 +176,10 @@ class IterativeGraphRAGRetriever(BaseRetriever):
 
             # LLM evaluation: enough context? which top-K to visit next?
             eval_result = await self._evaluate(query, candidates, compressed_summary)
+            selected_names = [id_to_name.get(nid, nid) for nid in eval_result.selected_ids]
             logger.info(
-                "Beam search iteration %d: has_sufficient_context=%s  selected_ids=%s",
-                iteration, eval_result.has_sufficient_context, eval_result.selected_ids,
+                "Beam search iteration %d: has_sufficient_context=%s  selected=%s",
+                iteration, eval_result.has_sufficient_context, selected_names,
             )
 
             if eval_result.has_sufficient_context:
