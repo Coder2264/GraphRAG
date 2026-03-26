@@ -213,6 +213,22 @@ class ServiceFactory:
                 vector_store=self._vector_store,
                 embedder=self._embedder,
             )
+        if mode == QueryMode.TOG:
+            from app.implementations.graph_rag.tog_retriever import ToGRetriever
+            return ToGRetriever(
+                graph_store=self._graph_store,
+                llm=self._llm,
+                beam_width=settings.beam_search_beam_width,
+                depth_max=settings.tog_depth_max,
+            )
+        if mode == QueryMode.TOG_R:
+            from app.implementations.graph_rag.tog_retriever import ToGRRetriever
+            return ToGRRetriever(
+                graph_store=self._graph_store,
+                llm=self._llm,
+                beam_width=settings.beam_search_beam_width,
+                depth_max=settings.tog_depth_max,
+            )
         return NoneRetriever()
 
     def get_llm(self) -> BaseLLM:
