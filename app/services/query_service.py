@@ -15,9 +15,11 @@ from app.prompts import (
     GRAPH_RAG_SYSTEM_PROMPT,
     NO_RAG_SYSTEM_PROMPT,
     RAG_SYSTEM_PROMPT,
+    TOG_SYSTEM_PROMPT,
     graph_rag_user_prompt,
     no_rag_user_prompt,
     rag_user_prompt,
+    tog_user_prompt,
 )
 
 
@@ -64,6 +66,9 @@ class QueryService:
         elif mode == QueryMode.GRAPHRAG:
             system_prompt = GRAPH_RAG_SYSTEM_PROMPT
             prompt = graph_rag_user_prompt(request.question, retrieval.context)
+        elif mode in (QueryMode.TOG, QueryMode.TOG_R):
+            system_prompt = TOG_SYSTEM_PROMPT
+            prompt = tog_user_prompt(request.question, retrieval.context)
         else:  # QueryMode.NONE
             system_prompt = NO_RAG_SYSTEM_PROMPT
             prompt = no_rag_user_prompt(request.question)

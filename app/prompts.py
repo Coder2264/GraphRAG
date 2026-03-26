@@ -592,3 +592,27 @@ def tog_generate_user_prompt(
         "A:"
     )
     return f"{shots}\n\n{query}" if shots else query
+
+
+# ---------------------------------------------------------------------------
+# ToG / ToG-R — QueryService integration prompts
+# ---------------------------------------------------------------------------
+
+TOG_SYSTEM_PROMPT = (
+    "You are answering a question using reasoning paths retrieved from "
+    "a knowledge graph. The context below contains the answer derived "
+    "from graph traversal. Present it clearly and concisely."
+)
+
+
+def tog_user_prompt(question: str, context: str) -> str:
+    """Build the user prompt for ToG and ToG-R query modes.
+
+    Args:
+        question: The user's natural-language question.
+        context:  The answer string produced by ToGRetriever / ToGRRetriever.
+
+    Returns:
+        Formatted prompt string with context before the question.
+    """
+    return f"Knowledge Graph Reasoning:\n{context}\n\nQuestion: {question}\n\nAnswer:"

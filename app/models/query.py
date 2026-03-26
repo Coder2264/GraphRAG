@@ -15,6 +15,8 @@ class QueryMode(str, Enum):
     GRAPHRAG = "graphrag"
     RAG = "rag"
     NONE = "none"
+    TOG = "tog"
+    TOG_R = "tog_r"
 
 
 class QueryRequest(BaseModel):

@@ -45,5 +45,8 @@ class Settings(BaseSettings):
     beam_search_max_iterations: int = 20
     beam_search_beam_width: int = 8
 
+    # Think-on-Graph (ToG / ToG-R) retriever
+    tog_depth_max: int = 3
+
 
 settings = Settings()

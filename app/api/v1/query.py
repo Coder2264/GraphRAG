@@ -70,3 +70,39 @@ async def query_none(
     service: Annotated[QueryService, Depends(get_query_service_for_mode(QueryMode.NONE))],
 ) -> QueryResponse:
     return await service.answer(request, mode=QueryMode.NONE)
+
+
+@router.post(
+    "/tog",
+    response_model=QueryResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Query using Think-on-Graph (ToG)",
+    description=(
+        "Runs the Think-on-Graph algorithm (Sun et al., ICLR 2024): iteratively "
+        "prunes relations and entities on the knowledge graph via LLM scoring, "
+        "then generates an answer from the accumulated reasoning paths."
+    ),
+)
+async def query_tog(
+    request: QueryRequest,
+    service: Annotated[QueryService, Depends(get_query_service_for_mode(QueryMode.TOG))],
+) -> QueryResponse:
+    return await service.answer(request, mode=QueryMode.TOG)
+
+
+@router.post(
+    "/tog_r",
+    response_model=QueryResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Query using Think-on-Graph with Random pruning (ToG-R)",
+    description=(
+        "Variant of ToG where entity pruning (Step D) uses random sampling instead "
+        "of LLM scoring, halving the number of LLM calls while preserving the "
+        "relation-pruning and reasoning-check steps."
+    ),
+)
+async def query_tog_r(
+    request: QueryRequest,
+    service: Annotated[QueryService, Depends(get_query_service_for_mode(QueryMode.TOG_R))],
+) -> QueryResponse:
+    return await service.answer(request, mode=QueryMode.TOG_R)
