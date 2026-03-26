@@ -19,6 +19,7 @@ LSP: Fully substitutable for BaseRetriever.
 from __future__ import annotations
 
 import logging
+import random
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -311,7 +312,7 @@ class ToGRetriever(BaseRetriever):
                     )
                     continue
                 relation = pending["relations"][-1]
-                selected = await self._prune_entities(query, relation, candidates)
+                selected = await self._entity_prune(query, relation, candidates, pending)
                 if selected is None:
                     continue
                 # Finalise: append selected entity → complete path at depth D.
@@ -440,13 +441,17 @@ class ToGRetriever(BaseRetriever):
         sorted_rels = sorted(result.relations, key=lambda r: r.score, reverse=True)
         return [sr.relation for sr in sorted_rels[: self._beam_width]]
 
-    async def _prune_entities(
+    async def _entity_prune(
         self,
         question: str,
         relation: str,
         candidates: list[str],
+        path: dict[str, Any],
     ) -> str | None:
         """Score candidate entities and return the top-scored one (Phase 2, Step D).
+
+        This method is intended to be overridden by subclasses that want to
+        replace the LLM-based scoring strategy (e.g. random sampling).
 
         Temperature hint: **0.4** (paper recommendation; see ``_prune_relations``).
 
@@ -454,6 +459,10 @@ class ToGRetriever(BaseRetriever):
             question:   The user's natural-language question.
             relation:   The relation label being traversed to reach the candidates.
             candidates: Candidate entity names reachable via ``relation``.
+            path:       The pending path dict being extended (``{"nodes": ...,
+                        "relations": ...}``).  Provided so subclasses can use
+                        path context if needed; unused by the default
+                        LLM-based implementation.
 
         Returns:
             The name of the highest-scoring entity, or ``None`` if the LLM
@@ -534,16 +543,69 @@ class ToGRetriever(BaseRetriever):
 
 
 # ---------------------------------------------------------------------------
-# Required imports from app/prompts.py (for wiring in the next step)
+# ToGRRetriever
 # ---------------------------------------------------------------------------
-# from app.prompts import (
-#     TOG_DEFAULT_EXAMPLES,
-#     TOG_RELATION_PRUNE_SYSTEM_PROMPT,
-#     TOG_ENTITY_PRUNE_SYSTEM_PROMPT,
-#     TOG_REASONING_SYSTEM_PROMPT,
-#     TOG_GENERATE_SYSTEM_PROMPT,
-#     tog_relation_prune_user_prompt,
-#     tog_entity_prune_user_prompt,
-#     tog_reasoning_user_prompt,
-#     tog_generate_user_prompt,
-# )
+
+
+class ToGRRetriever(ToGRetriever):
+    """Think-on-Graph with Random entity pruning (ToG-R).
+
+    Identical to :class:`ToGRetriever` except that Step D (entity pruning)
+    selects an entity by **random sampling** instead of asking the LLM to
+    score candidates.  This halves the number of LLM calls per query from
+    ``2*N*D + D + 1`` to ``N*D + D + 1``, where N is ``beam_width`` and D
+    is the exploration depth actually taken.
+
+    All constructor arguments, the ``retrieve()`` loop, and every other
+    private helper are inherited unchanged from :class:`ToGRetriever`.
+    Only ``_entity_prune()`` is overridden.
+
+    Args:
+        graph_store: Any :class:`~app.core.graph_store.BaseGraphStore` backend.
+        llm:         Any :class:`~app.core.llm.BaseLLM` backend used for
+                     relation pruning, reasoning checks, and answer generation.
+                     **Not** called during entity pruning.
+        beam_width:  Maximum relations kept per entity per hop (paper default N=3).
+        depth_max:   Hard cap on exploration iterations (paper default D_max=3).
+        examples:    Few-shot demonstrations forwarded to relation-pruning,
+                     reasoning, and generation prompts.
+                     Defaults to :data:`~app.prompts.TOG_DEFAULT_EXAMPLES`.
+    """
+
+    async def _entity_prune(
+        self,
+        question: str,
+        relation: str,
+        candidates: list[str],
+        path: dict[str, Any],
+    ) -> str | None:
+        """Randomly sample one entity from the candidates (Phase 2, Step D).
+
+        Replaces the LLM-based scoring of :class:`ToGRetriever` with a
+        uniform random draw, eliminating one LLM call per candidate set.
+
+        If the candidate pool is smaller than ``beam_width``, the full pool
+        is used; otherwise ``beam_width`` entities are sampled and one is
+        chosen from that sample uniformly at random.
+
+        Args:
+            question:   The user's natural-language question (unused — present
+                        only to satisfy the overridden method signature).
+            relation:   The relation label being traversed (unused — present
+                        only to satisfy the overridden method signature).
+            candidates: Candidate entity names reachable via ``relation``.
+            path:       The pending path dict being extended (unused — present
+                        only to satisfy the overridden method signature).
+
+        Returns:
+            A randomly chosen entity name, or ``None`` if ``candidates`` is
+            empty.
+        """
+        if not candidates:
+            return None
+        pool = (
+            candidates
+            if len(candidates) <= self._beam_width
+            else random.sample(candidates, self._beam_width)
+        )
+        return random.choice(pool)
