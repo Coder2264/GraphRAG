@@ -76,6 +76,14 @@ class InMemoryGraphStore(BaseGraphStore):
         nodes = [{"id": nid, **self._nodes[nid]} for nid in all_node_ids if nid in self._nodes]
         return {"nodes": nodes, "edges": result_edges}
 
+    async def get_relations(self, entity_id: str) -> list[str]:
+        relations = (
+            edge["relation"]
+            for edge in self._edges
+            if edge["src"] == entity_id or edge["dst"] == entity_id
+        )
+        return list(dict.fromkeys(relations))
+
     async def search_nodes(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
         """Naive substring search over node property values."""
         results = []
