@@ -104,6 +104,21 @@ class BaseGraphStore(ABC):
         """
         ...
 
+    @abstractmethod
+    async def get_relations(self, entity_id: str) -> list[str]:
+        """
+        Return all unique relation labels connected to this entity
+        (both inbound and outbound).
+
+        Args:
+            entity_id: The node's id property in the graph.
+
+        Returns:
+            Deduplicated list of relation label strings.
+            Returns an empty list if the entity does not exist.
+        """
+        ...
+
     # ------------------------------------------------------------------
     # Delete operations
     # ------------------------------------------------------------------

@@ -163,6 +163,17 @@ class Neo4jGraphStore(BaseGraphStore):
             return {"nodes": [], "edges": []}
         return {"nodes": record["nodes"], "edges": record["edges"]}
 
+    async def get_relations(self, entity_id: str) -> list[str]:
+        if not self._driver:
+            return []
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(
+                "MATCH (n {id: $entity_id})-[r]-() RETURN DISTINCT type(r) AS relation",
+                entity_id=entity_id,
+            )
+            records = await result.data()
+        return [r["relation"] for r in records]
+
     async def search_nodes(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
         """
         Full-text search using Neo4j's built-in fulltext index (if available)
