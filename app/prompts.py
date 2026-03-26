@@ -273,3 +273,322 @@ Text to extract from:
 
 JSON output:\
 """
+
+
+# ===========================================================================
+# ToG — Think-on-Graph (paper-faithful implementation)
+# Based on: "Think-on-Graph: Deep and Responsible Reasoning of LLM on KG"
+# Paper appendix E.3.1 - E.3.4
+# ===========================================================================
+
+# Five few-shot examples (KBQA-style) shared across all four ToG prompts.
+# Each dict must contain: question, entity, relation, entities (list),
+# relations (list), paths (list of triple-chain strings), answer,
+# relation_answer_json, entity_answer_json, reasoning_answer ("Yes"/"No").
+TOG_DEFAULT_EXAMPLES: list[dict] = [
+    # Example 1 — based on the paper's running Canberra/Australia example.
+    {
+        "question": "What is the capital of Australia and which party does its prime minister lead?",
+        "entity": "Australia",
+        "relation": "HAS_PRIME_MINISTER",
+        "entities": ["Anthony Albanese", "Scott Morrison", "Malcolm Turnbull"],
+        "relations": ["CAPITAL_OF", "HAS_PRIME_MINISTER", "LOCATED_IN", "MEMBER_OF"],
+        "paths": [
+            "(Australia, capital of, Canberra)",
+            "(Australia, prime minister, Anthony Albanese)",
+            "(Anthony Albanese, leader of, Australian Labor Party)",
+        ],
+        "answer": (
+            "Canberra is the capital of Australia. "
+            "Anthony Albanese leads the Australian Labor Party."
+        ),
+        "relation_answer_json": (
+            '{"relations": [{"relation": "CAPITAL_OF", "score": 0.5},'
+            ' {"relation": "HAS_PRIME_MINISTER", "score": 0.5}]}'
+        ),
+        "entity_answer_json": '{"entities": [{"entity": "Anthony Albanese", "score": 1.0}]}',
+        "reasoning_answer": "Yes",
+    },
+    # Example 2 — birthplace lookup.
+    {
+        "question": "In which city was Marie Curie born?",
+        "entity": "Marie Curie",
+        "relation": "BORN_IN",
+        "entities": ["Warsaw", "Paris", "London"],
+        "relations": ["BORN_IN", "NATIONALITY", "FIELD_OF_STUDY", "AWARD_WINNER"],
+        "paths": [
+            "(Marie Curie, born in, Warsaw)",
+            "(Warsaw, located in, Poland)",
+        ],
+        "answer": "Marie Curie was born in Warsaw, Poland.",
+        "relation_answer_json": (
+            '{"relations": [{"relation": "BORN_IN", "score": 0.8},'
+            ' {"relation": "NATIONALITY", "score": 0.2}]}'
+        ),
+        "entity_answer_json": '{"entities": [{"entity": "Warsaw", "score": 1.0}]}',
+        "reasoning_answer": "Yes",
+    },
+    # Example 3 — film director and studio.
+    {
+        "question": "Who directed the film Inception and which studio produced it?",
+        "entity": "Inception",
+        "relation": "DIRECTED_BY",
+        "entities": ["Christopher Nolan", "James Cameron", "Steven Spielberg"],
+        "relations": ["DIRECTED_BY", "PRODUCED_BY", "STARRING", "RELEASED_IN"],
+        "paths": [
+            "(Inception, directed by, Christopher Nolan)",
+            "(Inception, produced by, Warner Bros.)",
+        ],
+        "answer": "Inception was directed by Christopher Nolan and produced by Warner Bros.",
+        "relation_answer_json": (
+            '{"relations": [{"relation": "DIRECTED_BY", "score": 0.5},'
+            ' {"relation": "PRODUCED_BY", "score": 0.5}]}'
+        ),
+        "entity_answer_json": '{"entities": [{"entity": "Christopher Nolan", "score": 1.0}]}',
+        "reasoning_answer": "Yes",
+    },
+    # Example 4 — company CEO and headquarters.
+    {
+        "question": "Who is the CEO of Tesla and in which city is the company headquartered?",
+        "entity": "Tesla",
+        "relation": "CEO_OF",
+        "entities": ["Elon Musk", "Tim Cook", "Satya Nadella"],
+        "relations": ["CEO_OF", "HEADQUARTERED_IN", "PRODUCES", "FOUNDED_BY"],
+        "paths": [
+            "(Tesla, CEO, Elon Musk)",
+            "(Tesla, headquartered in, Austin)",
+            "(Austin, located in, Texas)",
+        ],
+        "answer": (
+            "Elon Musk is the CEO of Tesla. "
+            "The company is headquartered in Austin, Texas."
+        ),
+        "relation_answer_json": (
+            '{"relations": [{"relation": "CEO_OF", "score": 0.5},'
+            ' {"relation": "HEADQUARTERED_IN", "score": 0.5}]}'
+        ),
+        "entity_answer_json": '{"entities": [{"entity": "Elon Musk", "score": 1.0}]}',
+        "reasoning_answer": "Yes",
+    },
+    # Example 5 — sports team home city.
+    {
+        "question": "Which city is home to the NBA team the Golden State Warriors?",
+        "entity": "Golden State Warriors",
+        "relation": "HOME_CITY",
+        "entities": ["San Francisco", "Oakland", "Los Angeles"],
+        "relations": ["HOME_CITY", "PLAYS_IN", "FOUNDED_IN", "MEMBER_OF"],
+        "paths": [
+            "(Golden State Warriors, home city, San Francisco)",
+            "(Golden State Warriors, plays in, NBA)",
+            "(San Francisco, located in, California)",
+        ],
+        "answer": "The Golden State Warriors play in San Francisco, California.",
+        "relation_answer_json": (
+            '{"relations": [{"relation": "HOME_CITY", "score": 0.7},'
+            ' {"relation": "PLAYS_IN", "score": 0.3}]}'
+        ),
+        "entity_answer_json": '{"entities": [{"entity": "San Francisco", "score": 1.0}]}',
+        "reasoning_answer": "Yes",
+    },
+]
+
+# ---------------------------------------------------------------------------
+# ToG E.3.1 — Relation pruning
+# ---------------------------------------------------------------------------
+
+# Call .format(beam_width=N) before use; all other braces are literal JSON.
+TOG_RELATION_PRUNE_SYSTEM_PROMPT = """\
+You are a graph reasoning assistant helping answer a question by \
+traversing a knowledge graph.
+
+Your task: Given a question, a topic entity, and a list of candidate \
+relations connected to that entity, select the relations most likely \
+to lead toward the answer. Score each selected relation's contribution \
+on a scale from 0 to 1 (all scores must sum to 1).
+
+Rules:
+- Return ONLY a JSON object: {{"relations": [{{"relation": "...", \
+"score": 0.X}}, ...]}}
+- Select between 1 and {beam_width} relations.
+- Scores must sum to 1.0 (rounded to 2 decimal places).
+- Do NOT wrap in markdown or add text outside the JSON.\
+"""
+
+
+def tog_relation_prune_user_prompt(
+    question: str,
+    entity: str,
+    relations: list[str],
+    beam_width: int,
+    examples: list[dict],
+) -> str:
+    """Build the few-shot user prompt for the relation-pruning step.
+
+    Args:
+        question:   The user's natural-language question.
+        entity:     The topic entity currently being explored.
+        relations:  Candidate relation labels connected to the entity.
+        beam_width: Maximum number of relations to select (informational;
+                    the constraint is enforced by the system prompt).
+        examples:   Few-shot demonstrations; each dict must contain
+                    ``question``, ``entity``, ``relations`` (list), and
+                    ``relation_answer_json``.
+    """
+    shots = "\n\n".join(
+        f"Q: {ex['question']}\n"
+        f"Topic Entity: {ex['entity']}\n"
+        f"Relations: {', '.join(ex['relations'])}\n"
+        f"A: {ex['relation_answer_json']}"
+        for ex in examples
+    )
+    query = (
+        f"Q: {question}\n"
+        f"Topic Entity: {entity}\n"
+        f"Relations: {', '.join(relations)}\n"
+        "A:"
+    )
+    return f"{shots}\n\n{query}" if shots else query
+
+
+# ---------------------------------------------------------------------------
+# ToG E.3.2 — Entity pruning
+# ---------------------------------------------------------------------------
+
+TOG_ENTITY_PRUNE_SYSTEM_PROMPT = """\
+You are a graph reasoning assistant helping answer a question by \
+traversing a knowledge graph.
+
+Your task: Given a question, the current relation being explored, and \
+a list of candidate entities reachable via that relation, score each \
+entity's contribution to answering the question on a scale from 0 to 1 \
+(all scores must sum to 1).
+
+Rules:
+- Return ONLY a JSON object: {"entities": [{"entity": "...", \
+"score": 0.X}, ...]}
+- Scores must sum to 1.0 (rounded to 2 decimal places).
+- Do NOT wrap in markdown or add text outside the JSON.\
+"""
+
+
+def tog_entity_prune_user_prompt(
+    question: str,
+    relation: str,
+    entities: list[str],
+    examples: list[dict],
+) -> str:
+    """Build the few-shot user prompt for the entity-pruning step.
+
+    Args:
+        question:  The user's natural-language question.
+        relation:  The relation currently being traversed.
+        entities:  Candidate entity names reachable via the relation.
+        examples:  Few-shot demonstrations; each dict must contain
+                   ``question``, ``relation``, ``entities`` (list), and
+                   ``entity_answer_json``.
+    """
+    shots = "\n\n".join(
+        f"Q: {ex['question']}\n"
+        f"Relation: {ex['relation']}\n"
+        f"Entities: {', '.join(ex['entities'])}\n"
+        f"Score:\n{ex['entity_answer_json']}"
+        for ex in examples
+    )
+    query = (
+        f"Q: {question}\n"
+        f"Relation: {relation}\n"
+        f"Entities: {', '.join(entities)}\n"
+        "Score:"
+    )
+    return f"{shots}\n\n{query}" if shots else query
+
+
+# ---------------------------------------------------------------------------
+# ToG E.3.3 — Reasoning sufficiency check
+# ---------------------------------------------------------------------------
+
+TOG_REASONING_SYSTEM_PROMPT = """\
+You are a graph reasoning assistant. Given a question and a set of \
+reasoning paths retrieved from a knowledge graph (each path is a \
+sequence of entity-relation-entity triples), decide whether the \
+information in these paths is sufficient to answer the question.
+
+Answer ONLY "Yes" or "No".
+- "Yes" if the paths contain enough information to answer the question \
+(possibly combined with your own knowledge).
+- "No" if more graph traversal is needed.\
+"""
+
+
+def tog_reasoning_user_prompt(
+    question: str,
+    paths: list[str],
+    examples: list[dict],
+) -> str:
+    """Build the few-shot user prompt for the reasoning-sufficiency check.
+
+    Args:
+        question:  The user's natural-language question.
+        paths:     Reasoning paths accumulated so far; each is a
+                   triple-chain string such as
+                   ``"(Canberra, capital of, Australia), (Australia, ...)"``
+        examples:  Few-shot demonstrations; each dict must contain
+                   ``question``, ``paths`` (list of strings), and
+                   ``reasoning_answer`` ("Yes" or "No").
+    """
+    shots = "\n\n".join(
+        f"Q: {ex['question']}\n"
+        f"Knowledge triples: {chr(10).join(ex['paths'])}\n"
+        f"A: {ex['reasoning_answer']}"
+        for ex in examples
+    )
+    query = (
+        f"Q: {question}\n"
+        f"Knowledge triples: {chr(10).join(paths)}\n"
+        "A:"
+    )
+    return f"{shots}\n\n{query}" if shots else query
+
+
+# ---------------------------------------------------------------------------
+# ToG E.3.4 — Final answer generation
+# ---------------------------------------------------------------------------
+
+TOG_GENERATE_SYSTEM_PROMPT = """\
+You are a knowledgeable assistant. Given a question and a set of \
+reasoning paths retrieved from a knowledge graph (each path is a \
+sequence of entity-relation-entity triples), answer the question \
+using the provided knowledge paths and your own knowledge.
+
+Be concise and direct. State the answer clearly.\
+"""
+
+
+def tog_generate_user_prompt(
+    question: str,
+    paths: list[str],
+    examples: list[dict],
+) -> str:
+    """Build the few-shot user prompt for final answer generation.
+
+    Args:
+        question:  The user's natural-language question.
+        paths:     Reasoning paths accumulated so far; each is a
+                   triple-chain string such as
+                   ``"(Canberra, capital of, Australia), (Australia, ...)"``
+        examples:  Few-shot demonstrations; each dict must contain
+                   ``question``, ``paths`` (list of strings), and
+                   ``answer``.
+    """
+    shots = "\n\n".join(
+        f"Q: {ex['question']}\n"
+        f"Knowledge triples: {chr(10).join(ex['paths'])}\n"
+        f"A: {ex['answer']}"
+        for ex in examples
+    )
+    query = (
+        f"Q: {question}\n"
+        f"Knowledge triples: {chr(10).join(paths)}\n"
+        "A:"
+    )
+    return f"{shots}\n\n{query}" if shots else query
