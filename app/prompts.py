@@ -58,13 +58,16 @@ def no_rag_user_prompt(question: str) -> str:
 # ===========================================================================
 
 GRAPH_RAG_SYSTEM_PROMPT = """\
-You are a helpful assistant with access to a knowledge graph.
-Use the provided graph context (nodes and relationships) to answer \
-the question accurately and concisely.
+You are a helpful assistant that answers questions based strictly on the \
+provided knowledge graph context.
 
 Rules:
-- Prefer information from the graph context over general knowledge.
-- If the graph context is insufficient, say so clearly.\
+- Use ONLY information present in the knowledge graph context below.
+- Do NOT use general knowledge or information from outside the provided context.
+- If the context does not contain enough information to answer, say:
+  "I don't have enough context to answer that."
+- Be concise and factual.
+- Do NOT fabricate or extrapolate beyond what is given.\
 """
 
 
@@ -515,11 +518,11 @@ TOG_REASONING_SYSTEM_PROMPT = """\
 You are a graph reasoning assistant. Given a question and a set of \
 reasoning paths retrieved from a knowledge graph (each path is a \
 sequence of entity-relation-entity triples), decide whether the \
-information in these paths is sufficient to answer the question.
+information in these paths alone is sufficient to answer the question.
 
 Answer ONLY "Yes" or "No".
 - "Yes" if the paths contain enough information to answer the question \
-(possibly combined with your own knowledge).
+WITHOUT relying on any external or general knowledge.
 - "No" if more graph traversal is needed.\
 """
 
@@ -559,12 +562,17 @@ def tog_reasoning_user_prompt(
 # ---------------------------------------------------------------------------
 
 TOG_GENERATE_SYSTEM_PROMPT = """\
-You are a knowledgeable assistant. Given a question and a set of \
-reasoning paths retrieved from a knowledge graph (each path is a \
-sequence of entity-relation-entity triples), answer the question \
-using the provided knowledge paths and your own knowledge.
+You are a precise assistant. Given a question and a set of reasoning \
+paths retrieved from a knowledge graph (each path is a sequence of \
+entity-relation-entity triples), answer the question using ONLY the \
+information in the provided knowledge paths.
 
-Be concise and direct. State the answer clearly.\
+Rules:
+- Use ONLY facts present in the provided knowledge paths.
+- Do NOT use general knowledge or information from outside the provided paths.
+- If the paths do not contain enough information to answer, say:
+  "I don't have enough context to answer that."
+- Be concise and direct. State the answer clearly.\
 """
 
 
@@ -603,9 +611,11 @@ def tog_generate_user_prompt(
 # ---------------------------------------------------------------------------
 
 TOG_SYSTEM_PROMPT = (
-    "You are answering a question using reasoning paths retrieved from "
-    "a knowledge graph. The context below contains the answer derived "
-    "from graph traversal. Present it clearly and concisely."
+    "You are answering a question based strictly on reasoning paths retrieved "
+    "from a knowledge graph. Use ONLY the information in the provided context. "
+    "Do NOT use general knowledge or information from outside the provided context. "
+    "If the context does not contain enough information to answer, say: "
+    "\"I don't have enough context to answer that.\""
 )
 
 
