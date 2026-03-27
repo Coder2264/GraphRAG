@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.implementations.gemini.entity_extractor import GeminiEntityExtractor
+from app.implementations.gemini.llm import GeminiLLM
 from app.implementations.in_memory.embedder import InMemoryEmbedder
 from app.implementations.in_memory.entity_extractor import InMemoryEntityExtractor
 from app.implementations.in_memory.graph_store import InMemoryGraphStore
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
 LLM_REGISTRY: dict[str, type[BaseLLM]] = {
     "in_memory": InMemoryLLM,
     "ollama": OllamaLLM,
+    "gemini": GeminiLLM,
     # "openai":     OpenAILLM,    ← uncomment when ready
     # "anthropic":  AnthropicLLM,
 }

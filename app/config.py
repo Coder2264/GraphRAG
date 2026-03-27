@@ -10,9 +10,10 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     anthropic_api_key: str = ""
 
-    # Gemini (entity extraction during ingestion)
+    # Gemini
     gemini_api_key: str = ""
-    gemini_extraction_model: str = "gemini-2.5-pro"
+    gemini_extraction_model: str = "gemini-3-flash"
+    gemini_llm_model: str = "gemini-3-flash"
 
     # Databases
     postgres_dsn: str = ""

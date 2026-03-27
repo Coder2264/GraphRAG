@@ -102,6 +102,11 @@ class ServiceFactory:
                 model_name=settings.ollama_llm_model,
                 base_url=settings.ollama_base_url,
             )
+        if self._llm_key == "gemini":
+            return cls(  # type: ignore[call-arg]
+                api_key=settings.gemini_api_key,
+                model_name=settings.gemini_llm_model,
+            )
         return cls()
 
     def _build_embedder(self) -> BaseEmbedder:
