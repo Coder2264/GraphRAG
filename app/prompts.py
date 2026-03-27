@@ -232,11 +232,15 @@ Rules:
 - If no canonical name fits, set "relation" to "RAW_RELATION" and add two keys to "properties":
     "raw_text": "<the original relationship phrasing from the text>",
     "canonical": null
-- CONNECTIVITY: The extracted entities and relations MUST form a single connected graph
-  when treated as undirected (every entity reachable from every other via relationships).
-- Every entity MUST participate in at least one relation with another extracted entity.
-- Do NOT include isolated entities that have no relationship with any other entity.
-- If an entity cannot be naturally connected to the main graph through the text, omit it.
+- Extract ALL meaningful entities — do not omit any entity even if it appears only once.
+- Include isolated entities (those with no extracted relation to others) — they are valid.
+- Capture every stated or clearly implied relation, including fine-grained ones (dates,
+  locations, product specs, supply agreements, subsidiaries, roles, events, etc.).
+- Prefer more relations over fewer; it is better to over-extract than to miss information.
+- DEDUPLICATION: If the same real-world entity is mentioned multiple times or referred to
+  in different ways (e.g. "Oxford University" and "Oxford" both meaning the same institution),
+  emit it ONCE with a single canonical id and attach ALL its relations to that one entry.
+  Do NOT create separate entity entries for the same underlying entity.
 - Do NOT wrap the JSON in a code block or add any text outside the JSON.\
 """
 

@@ -30,9 +30,13 @@ class Settings(BaseSettings):
     # Embedding
     embedding_dim: int = 0
 
-    # Chunking
+    # Chunking (RAG vector store)
     chunk_size: int = 0
     chunk_overlap: int = 0
+
+    # Graph extraction chunking (separate from RAG — larger chunks for entity context)
+    graph_extraction_chunk_size: int = 6000
+    graph_extraction_chunk_overlap: int = 800
 
     # Default providers
     default_llm: str = ""

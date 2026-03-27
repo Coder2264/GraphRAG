@@ -3,19 +3,19 @@ GraphRAGIngestionPipeline — BaseIngestionPipeline for the GraphRAG path.
 
 Pipeline:
   1. Extract plain text from the document (same as RAG).
-     The FULL document text is passed to the entity extractor as a single
-     piece — it is never split into chunks.  Chunking is a RAG-only concern;
-     entity extraction needs global document context to produce a coherent,
-     connected knowledge graph.
-  2. Call BaseEntityExtractor to extract entities + relations from the text.
-  3. Filter entities and relations to the largest connected component
-     (isolated entities are dropped so the persisted graph is always connected).
+  2. Split the text into overlapping chunks and run the entity extractor on
+     each chunk independently (multi-pass).  For short documents that fit
+     inside a single chunk the extraction is a single LLM call.
+  3. Merge results across chunks: entities are deduplicated by normalised name
+     so the same real-world entity mentioned in multiple chunks maps to one
+     canonical node; relation IDs are remapped to canonical entity IDs and
+     exact duplicates are removed.
   4. Persist each entity as a Neo4j node (:Entity + type label).
   5. Persist each relation as a Neo4j edge.
 
-No Document root node is created; entities are linked only through their
-own extracted relationships.  The doc_id is stored as a property on every
-entity node so they can be found and deleted together.
+ALL extracted entities are persisted — including isolated ones (no relations).
+The old "largest connected component" filter has been removed so that no valid
+entity is silently dropped.
 
 SRP: Only owns the graph ingestion concern.
 DIP: Depends on BaseEntityExtractor, BaseDocumentProcessor, BaseGraphStore.
@@ -28,6 +28,7 @@ import uuid
 from collections import defaultdict, deque
 from typing import Any
 
+from app.config import settings
 from app.core.document_processor import BaseDocumentProcessor
 from app.core.entity_extractor import BaseEntityExtractor
 from app.core.graph_store import BaseGraphStore
@@ -44,9 +45,9 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
     `doc_id` (UUID) used by the RAG pipeline is re-used here so both
     stores stay in sync on the same document identity.
 
-    Only entities that form part of the largest connected component are
-    persisted.  No Document root node is created; connectivity is
-    determined solely by extracted entity-to-entity relationships.
+    Multi-pass chunked extraction is used so that long documents are
+    processed in overlapping segments and results merged.  All extracted
+    entities are persisted regardless of connectivity.
 
     Usage:
         pipeline = GraphRAGIngestionPipeline(
@@ -91,10 +92,11 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
         """
         Extract entities/relations and store them in Neo4j.
 
-        The entire document text is passed to the entity extractor as a
-        single unit — no chunking is performed.  Chunking is a RAG-only
-        concern; splitting the text here would fragment entity context and
-        produce disconnected graphs.
+        The document is split into overlapping chunks and each chunk is
+        processed by the entity extractor independently.  Results are merged
+        by normalised entity name before being persisted so the same
+        real-world entity is stored only once regardless of how many chunks
+        it appears in.
 
         Args:
             content:    Raw text (used when file_bytes is not provided).
@@ -108,9 +110,7 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
         """
         doc_id = doc_id or str(uuid.uuid4())
 
-        # 1. Extract full document text — never chunked for GraphRAG.
-        # chunk_text() is intentionally NOT called here; the extractor needs
-        # the complete document to reason about entity relationships globally.
+        # 1. Extract full document text.
         if file_bytes is not None and filename is not None:
             text = await self._processor.extract_text(file_bytes, filename)
         else:
@@ -121,22 +121,31 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
             self._last_entities_count = 0
             return doc_id
 
-        # 2. Extract entities + relations via LLM
-        logger.info("GraphRAG [%s]: starting entity extraction (text length=%d chars)", doc_id, len(text))
-        extraction = await self._extractor.extract(text, processing_instruction)
-        entities: list[dict] = extraction.get("entities", [])
-        relations: list[dict] = extraction.get("relations", [])
+        # 2. Extract entities + relations via multi-pass chunked extraction.
+        logger.info(
+            "GraphRAG [%s]: starting entity extraction (text length=%d chars)",
+            doc_id, len(text),
+        )
+        entities, relations = await self._extract_multi_pass(text, processing_instruction)
 
         logger.info(
             "GraphRAG [%s]: extracted %d entities, %d relations",
             doc_id, len(entities), len(relations),
         )
 
-        # 3. Filter to largest connected component
-        entities, relations = self._largest_connected_component(entities, relations)
+        # 3. Drop relations referencing unknown entity IDs (defensive clean-up
+        #    in case the LLM produced a relation whose endpoint was later
+        #    deduped away or never extracted).
+        entity_id_set = {e["id"] for e in entities if e.get("id")}
+        relations = [
+            r for r in relations
+            if r.get("src_id") in entity_id_set
+            and r.get("dst_id") in entity_id_set
+            and r.get("src_id") != r.get("dst_id")
+        ]
 
         logger.info(
-            "GraphRAG [%s]: after connectivity filter — %d entities, %d relations",
+            "GraphRAG [%s]: after validation — %d entities, %d relations",
             doc_id, len(entities), len(relations),
         )
         for e in entities:
@@ -209,6 +218,124 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
     # Private helpers
     # ------------------------------------------------------------------
 
+    async def _extract_multi_pass(
+        self,
+        text: str,
+        processing_instruction: str,
+    ) -> tuple[list[dict], list[dict]]:
+        """
+        Extract entities and relations using overlapping chunks.
+
+        For short documents (≤ graph_extraction_chunk_size chars) a single
+        extraction call is made.  For longer documents the text is split into
+        overlapping chunks; each chunk is extracted independently and the
+        results are merged by normalised entity name so cross-chunk duplicates
+        collapse into a single canonical entity node.
+
+        Args:
+            text:                   Full document text.
+            processing_instruction: Optional extraction hint passed to the LLM.
+
+        Returns:
+            (merged_entities, merged_relations)
+        """
+        chunk_size = settings.graph_extraction_chunk_size
+        overlap = settings.graph_extraction_chunk_overlap
+        chunks = self._split_text(text, chunk_size, overlap)
+
+        if len(chunks) <= 1:
+            result = await self._extractor.extract(text, processing_instruction)
+            return result.get("entities", []), result.get("relations", [])
+
+        logger.info(
+            "GraphRAGIngestionPipeline: multi-pass extraction over %d chunks", len(chunks)
+        )
+
+        # normalised_name → first-seen entity dict (canonical record)
+        all_entities: dict[str, dict] = {}
+        # normalised_name → canonical slug id chosen on first encounter
+        name_to_canonical_id: dict[str, str] = {}
+        all_relations: list[dict] = []
+
+        for i, chunk in enumerate(chunks):
+            logger.info(
+                "GraphRAGIngestionPipeline: extracting chunk %d/%d", i + 1, len(chunks)
+            )
+            result = await self._extractor.extract(chunk, processing_instruction)
+
+            chunk_entities: list[dict] = result.get("entities", [])
+            chunk_relations: list[dict] = result.get("relations", [])
+
+            # Map this chunk's local entity IDs → the canonical global IDs
+            local_to_canonical: dict[str, str] = {}
+
+            for entity in chunk_entities:
+                local_id = entity.get("id", "")
+                name = entity.get("name", "")
+                if not local_id or not name:
+                    continue
+                key = name.strip().lower()
+                if key not in all_entities:
+                    all_entities[key] = entity
+                    name_to_canonical_id[key] = local_id
+                canonical_id = name_to_canonical_id[key]
+                local_to_canonical[local_id] = canonical_id
+
+            for rel in chunk_relations:
+                src = local_to_canonical.get(rel.get("src_id", ""))
+                dst = local_to_canonical.get(rel.get("dst_id", ""))
+                if src and dst:
+                    all_relations.append({**rel, "src_id": src, "dst_id": dst})
+
+        # Ensure every entity record carries the canonical id
+        merged_entities = list(all_entities.values())
+        for entity in merged_entities:
+            key = entity.get("name", "").strip().lower()
+            entity["id"] = name_to_canonical_id.get(key, entity["id"])
+
+        # Deduplicate relations with the same (src, dst, relation) triple
+        seen_rels: set[tuple] = set()
+        deduped_relations: list[dict] = []
+        for rel in all_relations:
+            key = (rel.get("src_id"), rel.get("dst_id"), rel.get("relation"))
+            if key not in seen_rels:
+                seen_rels.add(key)
+                deduped_relations.append(rel)
+
+        logger.info(
+            "GraphRAGIngestionPipeline: merged extraction — %d entities, %d relations",
+            len(merged_entities), len(deduped_relations),
+        )
+        return merged_entities, deduped_relations
+
+    @staticmethod
+    def _split_text(text: str, chunk_size: int, overlap: int) -> list[str]:
+        """
+        Split text into overlapping character-level chunks.
+
+        Returns the original text as a single-element list when chunk_size
+        is not positive or the text fits in one chunk.
+
+        Args:
+            text:       Full document text.
+            chunk_size: Maximum characters per chunk.
+            overlap:    Characters shared between adjacent chunks.
+
+        Returns:
+            List of non-empty chunk strings in document order.
+        """
+        if chunk_size <= 0 or len(text) <= chunk_size:
+            return [text]
+        step = max(1, chunk_size - overlap)
+        chunks: list[str] = []
+        start = 0
+        while start < len(text):
+            chunk = text[start : start + chunk_size].strip()
+            if chunk:
+                chunks.append(chunk)
+            start += step
+        return chunks
+
     @staticmethod
     def _largest_connected_component(
         entities: list[dict],
@@ -218,10 +345,9 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
         Return only the entities and relations that form the largest connected
         component, treating the graph as undirected.
 
-        Entities with no valid relations are isolated nodes and are excluded
-        when a larger connected component exists.  If all entities are
-        isolated (no relations at all) the largest single-node component is
-        returned — i.e. only one entity survives.
+        NOTE: This method is no longer called by ingest().  It is retained for
+        debugging / future use only.  The ingestion pipeline now persists ALL
+        extracted entities rather than filtering to the largest cluster.
 
         Args:
             entities:  List of entity dicts, each must have an "id" key.
