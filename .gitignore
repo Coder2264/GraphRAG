@@ -5,3 +5,8 @@
 __pycache__/
 logs/
 Tests/
+
+# Eval pipeline — generated artifacts and results (not committed)
+eval/manual_input/
+eval/generated/
+eval/results/
