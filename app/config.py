@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     # Gemini
     gemini_api_key: str = ""
     gemini_llm_model: str = "gemini-3-flash-preview"
-    gemini_embed_model: str = "models/gemini-embedding-exp-03-07"
+    gemini_embed_model: str = "models/gemini-embedding-2-preview"
     gemini_extraction_model: str = "gemini-3-flash-preview"
 
     # Databases

@@ -27,10 +27,10 @@ class GeminiEmbedder(BaseEmbedder):
     Constructor args map directly from settings:
         api_key:    Google Gemini API key.
         model_name: Gemini embedding model identifier.
-                    e.g. "models/gemini-embedding-exp-03-07"
+                    e.g. "models/gemini-embedding-2-preview"
     """
 
-    def __init__(self, api_key: str, model_name: str = "models/gemini-embedding-exp-03-07") -> None:
+    def __init__(self, api_key: str, model_name: str = "models/gemini-embedding-2-preview") -> None:
         genai.configure(api_key=api_key)
         self._model_name = model_name
 

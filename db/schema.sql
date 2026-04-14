@@ -5,8 +5,8 @@
 -- Apply manually:
 --   psql $POSTGRES_DSN -f db/schema.sql
 --
--- NOTE: The embedding dimension (1024) must match EMBEDDING_DIM in .env.
---       nomic-embed-text → 768  |  mxbai-embed-large → 1024  |  all-minilm → 384
+-- NOTE: The embedding dimension must match EMBEDDING_DIM in .env.
+--       gemini-embedding-2-preview → 3072  |  mxbai-embed-large → 1024  |  all-minilm → 384
 --       If you change models, drop and recreate the table.
 -- =============================================================================
 
@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS rag_chunks (
 
     -- Content + vector
     content       TEXT        NOT NULL DEFAULT '',
-    embedding     vector(1024),                           -- change dim to match your model
+    embedding     vector(3072),                           -- change dim to match your model
 
     -- Housekeeping
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -36,13 +36,13 @@ CREATE TABLE IF NOT EXISTS rag_chunks (
 CREATE INDEX IF NOT EXISTS rag_chunks_doc_id_idx
     ON rag_chunks (doc_id);
 
--- IVFFlat approximate nearest-neighbour index (cosine distance)
--- Tune `lists` after you have data: a good starting point is sqrt(row_count).
--- With < ~1 000 rows exact scan (no index) is typically faster anyway.
-CREATE INDEX IF NOT EXISTS rag_chunks_embedding_idx
-    ON rag_chunks
-    USING ivfflat (embedding vector_cosine_ops)
-    WITH (lists = 100);
+-- ANN indexes (ivfflat / hnsw) are limited to ≤2000 dims in pgvector.
+-- gemini-embedding-2-preview outputs 3072 dims, so no ANN index is created here.
+-- pgvector automatically falls back to an exact sequential scan, which is
+-- correct and fast enough for development-scale datasets.
+-- If you switch to a model with ≤2000 dims, re-enable with:
+--   CREATE INDEX rag_chunks_embedding_idx ON rag_chunks
+--       USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
 
 -- =============================================================================
 -- GraphRAG: Configurable entity and relation type catalogs

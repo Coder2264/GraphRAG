@@ -109,14 +109,18 @@ class PostgresVectorStore(BaseVectorStore):
                     ON {self._table} (doc_id);
                 """
             )
-            await conn.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS {self._table}_embedding_idx
-                    ON {self._table}
-                    USING ivfflat (embedding vector_cosine_ops)
-                    WITH (lists = 100);
-                """
-            )
+            # ANN indexes (ivfflat / hnsw) are limited to ≤2000 dims in pgvector.
+            # For models with higher-dimensional embeddings (e.g. Gemini at 3072)
+            # pgvector falls back to an exact sequential scan automatically.
+            if self._embedding_dim <= 2000:
+                await conn.execute(
+                    f"""
+                    CREATE INDEX IF NOT EXISTS {self._table}_embedding_idx
+                        ON {self._table}
+                        USING hnsw (embedding vector_cosine_ops)
+                        WITH (m = 16, ef_construction = 64);
+                    """
+                )
 
     # ------------------------------------------------------------------
     # Write
