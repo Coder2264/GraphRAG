@@ -331,6 +331,18 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
             key = entity.get("name", "").strip().lower()
             entity["id"] = name_to_canonical_id.get(key, entity["id"])
 
+        # Deduplicate entities by their final canonical id (different names can
+        # map to the same id when the LLM produces the same slug for variants
+        # like "Dr. Seraphine Voss" and "Seraphine Voss").  Keep first-seen.
+        seen_entity_ids: set[str] = set()
+        deduped_entities: list[dict] = []
+        for entity in merged_entities:
+            eid = entity.get("id", "")
+            if eid and eid not in seen_entity_ids:
+                seen_entity_ids.add(eid)
+                deduped_entities.append(entity)
+        merged_entities = deduped_entities
+
         # Deduplicate relations with the same (src, dst, relation) triple
         seen_rels: set[tuple] = set()
         deduped_relations: list[dict] = []

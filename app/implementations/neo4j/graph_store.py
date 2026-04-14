@@ -86,15 +86,25 @@ class Neo4jGraphStore(BaseGraphStore):
     # ------------------------------------------------------------------
 
     async def add_node(self, node_id: str, labels: list[str], data: dict[str, Any]) -> None:
-        """MERGE a node by its id property, set labels and properties."""
+        """MERGE a node by its id property, set labels and properties.
+
+        Always MERGEs on the fixed :Entity label so that the same node_id is
+        found even when callers supply different type labels across calls (e.g.
+        the same entity extracted as "Organization" in one chunk and "person" in
+        another).  Extra labels beyond :Entity are applied with separate SET
+        statements after the MERGE.
+        """
         assert self._driver, "Call connect() first."
-        escaped = [f"`{lbl.replace('`', '')}`" for lbl in labels] if labels else ["`Node`"]
-        label_str = ":".join(escaped)
+        extra_labels = [lbl for lbl in labels if lbl != "Entity"]
+        extra_set = " ".join(
+            f"SET n:`{lbl.replace('`', '')}`" for lbl in extra_labels
+        )
         async with self._driver.session(database=self._database) as session:
             await session.run(
                 f"""
-                MERGE (n:{label_str} {{id: $node_id}})
+                MERGE (n:Entity {{id: $node_id}})
                 SET n += $props
+                {extra_set}
                 """,
                 node_id=node_id,
                 props=data,
