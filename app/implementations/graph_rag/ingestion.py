@@ -216,8 +216,11 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
         return doc_id
 
     async def delete(self, doc_id: str) -> None:
-        """Delete all entity nodes belonging to this document."""
+        """Delete all entity nodes and graph extraction chunks for this document."""
         await self._graph_store.delete_nodes_by_doc_id(doc_id)
+        if self._vector_store and hasattr(self._vector_store, "delete_by_doc_id"):
+            # Graph extraction chunks are stored under "{doc_id}__graph" parent doc_id
+            await self._vector_store.delete_by_doc_id(f"{doc_id}__graph")  # type: ignore[attr-defined]
 
     # ------------------------------------------------------------------
     # Private helpers

@@ -116,6 +116,11 @@ class ServiceFactory:
                 model_name=settings.ollama_embed_model,
                 base_url=settings.ollama_base_url,
             )
+        if self._embedder_key == "gemini":
+            return cls(  # type: ignore[call-arg]
+                api_key=settings.gemini_api_key,
+                model_name=settings.gemini_embed_model,
+            )
         return cls()
 
     def _build_graph_store(self) -> BaseGraphStore:

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from app.implementations.gemini.embedder import GeminiEmbedder
 from app.implementations.gemini.entity_extractor import GeminiEntityExtractor
 from app.implementations.gemini.llm import GeminiLLM
 from app.implementations.in_memory.embedder import InMemoryEmbedder
@@ -47,6 +48,7 @@ LLM_REGISTRY: dict[str, type[BaseLLM]] = {
 EMBEDDER_REGISTRY: dict[str, type[BaseEmbedder]] = {
     "in_memory": InMemoryEmbedder,
     "ollama": OllamaEmbedder,
+    "gemini": GeminiEmbedder,
     # "openai":   OpenAIEmbedder,
     # "cohere":   CohereEmbedder,
 }
