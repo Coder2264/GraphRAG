@@ -374,6 +374,90 @@ python eval/eval_rag.py --validated eval/generated/qa_pairs_validated.json
 
 ---
 
+## Alternative: Manual Web LLM Evaluation
+
+Use this path when you don't have a Gemini API key for the automated judge, or when you want a second opinion from ChatGPT / Gemini web UIs.
+
+### Step 5a — Export responses for judging
+
+With the GraphRAG server running, generate answers for every validated QA pair and bundle them into a single JSON file:
+
+```bash
+python eval/eval_manual_export.py
+```
+
+Output: `eval/results/manual_eval_export_{timestamp}.json`
+
+The file contains the questions, gold answers, retrieved context, system answers, and a built-in instruction block (`instructions_for_web_llm`) telling the judge exactly what to do.
+
+#### CLI options
+
+```bash
+# Change which modes are queried
+python eval/eval_manual_export.py --modes tog rag none
+
+# Change top-K retrieval
+python eval/eval_manual_export.py --top-k 10
+
+# Use a different validated QA file
+python eval/eval_manual_export.py --validated eval/generated/qa_pairs_validated.json
+
+# Use a different server URL
+python eval/eval_manual_export.py --api http://localhost:9000
+```
+
+---
+
+### Step 5b — Get judgments from a web LLM
+
+1. Open [ChatGPT](https://chat.openai.com) or [Gemini](https://gemini.google.com) in your browser.
+2. Upload (or paste) the contents of `manual_eval_export_{timestamp}.json`.
+3. The file's `instructions_for_web_llm` field already contains the judging prompt — no extra instructions needed.
+4. The model will return a JSON array. Each element looks like:
+
+```json
+[
+  {
+    "qa_id": "doc_001_q1",
+    "mode": "tog",
+    "retrieval_score": 8,
+    "retrieval_reason": "Context contained all three hops needed.",
+    "answer_score": 7,
+    "answer_reason": "Answer is correct but missing one supporting detail."
+  },
+  ...
+]
+```
+
+5. Copy the JSON array and save it to a file, e.g. `eval/results/judgments.json`.
+
+---
+
+### Step 5c — Import judgments and generate report
+
+```bash
+python eval/eval_manual_import.py \
+  --export  eval/results/manual_eval_export_{timestamp}.json \
+  --judgments eval/results/judgments.json
+```
+
+Both `--export` and `--judgments` are required.
+
+Output:
+- `eval/results/manual_eval_results_{timestamp}.json` — full scored results
+- `eval/results/manual_report_{timestamp}.md` — per-mode comparison report
+
+The terminal also prints a quick summary:
+
+```
+Mode      Retrieval  Answer
+tog        8.20/10    7.40/10
+rag        4.10/10    3.80/10
+none       0.00/10    2.10/10
+```
+
+---
+
 ## Expected Results
 
 On well-designed multi-hop documents, expect approximately:
@@ -392,22 +476,27 @@ ToG's advantage grows with hop count: expect +3-4 points on 3-hop vs. RAG.
 
 ```
 eval/
-├── config.py           # All tunable constants
-├── prompts.py          # All prompt strings (generation, validation, judge)
-├── utils.py            # PDF creation, Gemini wrapper, JSON parser
-├── import_manual.py    # Import JSON files → PDFs + manifest
-├── validate_qa.py      # 4-dimension QA quality scoring
-├── eval_rag.py         # tog vs rag vs none benchmark
-├── README.md           # This file
-├── manual_input/       # Drop doc_NNN.json files here (git-ignored)
-├── generated/          # Created by import_manual.py (git-ignored)
-│   ├── docs/           # PDF files
-│   ├── qa_pairs/       # Per-document QA JSONs
+├── config.py                   # All tunable constants
+├── prompts.py                  # All prompt strings (generation, validation, judge)
+├── utils.py                    # PDF creation, Gemini wrapper, JSON parser
+├── import_manual.py            # Import JSON files → PDFs + manifest
+├── validate_qa.py              # 4-dimension QA quality scoring
+├── eval_rag.py                 # Automated benchmark (API-based LLM judge)
+├── eval_manual_export.py       # Export responses for manual web LLM judging
+├── eval_manual_import.py       # Import web LLM judgments → report
+├── README.md                   # This file
+├── manual_input/               # Drop doc_NNN.json files here (git-ignored)
+├── generated/                  # Created by import_manual.py (git-ignored)
+│   ├── docs/                   # PDF files
+│   ├── qa_pairs/               # Per-document QA JSONs
 │   ├── manifest.json
 │   └── qa_pairs_validated.json
-└── results/            # Created by eval_rag.py (git-ignored)
-    ├── eval_results_*.json
-    └── report_*.md
+└── results/                    # Created by eval scripts (git-ignored)
+    ├── eval_results_*.json          # Automated evaluation results
+    ├── report_*.md                  # Automated evaluation report
+    ├── manual_eval_export_*.json    # Export bundle for web LLM judging
+    ├── manual_eval_results_*.json   # Manual evaluation results
+    └── manual_report_*.md           # Manual evaluation report
 ```
 
 ---
