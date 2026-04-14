@@ -31,11 +31,15 @@ from app.core.llm import BaseLLM
 from app.core.retriever import BaseRetriever, RetrievalResult
 from app.core.vector_store import BaseVectorStore
 from app.prompts import (
+    TOG_BATCH_ENTITY_PRUNE_SYSTEM_PROMPT,
+    TOG_BATCH_RELATION_PRUNE_SYSTEM_PROMPT,
     TOG_DEFAULT_EXAMPLES,
     TOG_ENTITY_PRUNE_SYSTEM_PROMPT,
     TOG_GENERATE_SYSTEM_PROMPT,
     TOG_REASONING_SYSTEM_PROMPT,
     TOG_RELATION_PRUNE_SYSTEM_PROMPT,
+    tog_batch_entity_prune_user_prompt,
+    tog_batch_relation_prune_user_prompt,
     tog_entity_prune_user_prompt,
     tog_generate_user_prompt,
     tog_reasoning_user_prompt,
@@ -80,6 +84,32 @@ class _EntityPruneResult(BaseModel):
     """Structured output for entity pruning (Phase 2, Step D)."""
 
     entities: list[_ScoredEntity] = Field(default_factory=list)
+
+
+class _BatchRelationEntry(BaseModel):
+    """One entity's pruned relations in a batched relation-pruning response."""
+
+    idx: int
+    relations: list[_ScoredRelation] = Field(default_factory=list)
+
+
+class _BatchRelationPruneResult(BaseModel):
+    """Structured output for batched relation pruning (Step B, all entities)."""
+
+    results: list[_BatchRelationEntry] = Field(default_factory=list)
+
+
+class _BatchEntityEntry(BaseModel):
+    """One path's scored entities in a batched entity-pruning response."""
+
+    idx: int
+    entities: list[_ScoredEntity] = Field(default_factory=list)
+
+
+class _BatchEntityPruneResult(BaseModel):
+    """Structured output for batched entity pruning (Step D, all paths)."""
+
+    results: list[_BatchEntityEntry] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -340,28 +370,24 @@ class ToGRetriever(BaseRetriever):
                 time.monotonic() - t_a, total_rels,
             )
 
-            # ── Step B: Relation pruning (parallel) ──────────────────────
-            # For each entity ask the LLM to score and keep ≤ beam_width relations.
-            # Pass the human-readable name to the LLM, not the internal ID.
+            # ── Step B: Relation pruning (batched) ───────────────────────
+            # All entities are scored in a single LLM call instead of one
+            # call per entity, eliminating N-1 network round-trips.
             entities_with_rels = [(eid, rels) for eid, rels in entity_relations.items() if rels]
             t_b = time.monotonic()
             logger.info(
-                "ToGRetriever [B]: pruning relations for %d entities via LLM (parallel)",
+                "ToGRetriever [B]: pruning relations for %d entities via LLM (batched)",
                 len(entities_with_rels),
             )
-
-            async def _prune_one_rel(eid: str, relations: list[str]) -> tuple[str, list[str]]:
-                entity_name = unique_tails[eid].get("name", eid)
-                pruned = await self._prune_relations(query, entity_name, relations)
-                logger.debug(
-                    "ToGRetriever [B]: entity_id=%r → pruned to %s", eid, pruned
-                )
-                return eid, pruned
-
-            pruned_pairs = await asyncio.gather(
-                *[_prune_one_rel(eid, rels) for eid, rels in entities_with_rels]
-            )
-            entity_pruned_relations: dict[str, list[str]] = dict(pruned_pairs)
+            name_rel_pairs = [
+                (unique_tails[eid].get("name", eid), rels)
+                for eid, rels in entities_with_rels
+            ]
+            pruned_rels_list = await self._prune_relations_batch(query, name_rel_pairs)
+            entity_pruned_relations: dict[str, list[str]] = {
+                eid: pruned_rels
+                for (eid, _), pruned_rels in zip(entities_with_rels, pruned_rels_list)
+            }
             for eid in entity_relations:
                 entity_pruned_relations.setdefault(eid, [])
             logger.info(
@@ -422,38 +448,16 @@ class ToGRetriever(BaseRetriever):
                 "ToGRetriever [C]: done in %.1fs", time.monotonic() - t_c
             )
 
-            # ── Step D: Entity pruning (parallel) ────────────────────────
-            # Pass candidate names to LLM; look up the selected name in candidate dicts.
+            # ── Step D: Entity pruning (batched) ─────────────────────────
+            # All paths are scored in a single LLM call instead of one call
+            # per path, eliminating M-1 network round-trips.
             non_empty_candidates = [(p, c) for p, c in path_candidates if c]
             t_d = time.monotonic()
             logger.info(
-                "ToGRetriever [D]: entity pruning for %d candidate sets via LLM (parallel)",
+                "ToGRetriever [D]: entity pruning for %d candidate sets via LLM (batched)",
                 len(non_empty_candidates),
             )
-
-            async def _prune_one_entity(
-                pending: dict[str, Any], candidates: list[dict[str, Any]]
-            ) -> dict[str, Any] | None:
-                relation = pending["relations"][-1]
-                candidate_names = [c["name"] for c in candidates]
-                selected_name = await self._entity_prune(
-                    query, relation, candidate_names, pending
-                )
-                if selected_name is None:
-                    return None
-                selected_dict = next(
-                    (c for c in candidates if c["name"].lower() == selected_name.lower()),
-                    {"id": selected_name, "name": selected_name, "source_chunk_id": "", "edge_chunk_id": ""},
-                )
-                return {
-                    "nodes": pending["nodes"] + [selected_dict],
-                    "relations": list(pending["relations"]),
-                    "edge_chunk_ids": list(pending["edge_chunk_ids"]) + [selected_dict.get("edge_chunk_id", "")],
-                }
-
-            prune_results = await asyncio.gather(
-                *[_prune_one_entity(p, c) for p, c in non_empty_candidates]
-            )
+            prune_results = await self._entity_prune_batch(query, non_empty_candidates)
             new_paths: list[dict[str, Any]] = []
             for new_path in prune_results:
                 if new_path is not None:
@@ -656,6 +660,97 @@ class ToGRetriever(BaseRetriever):
         best = max(result.entities, key=lambda e: e.score)
         return best.entity
 
+    async def _prune_relations_batch(
+        self,
+        question: str,
+        name_rel_pairs: list[tuple[str, list[str]]],
+    ) -> list[list[str]]:
+        """Prune relations for all entities in a single LLM call (Step B).
+
+        Replaces the ``asyncio.gather`` fan-out over ``_prune_relations`` with
+        one batched request, eliminating per-entity network round-trips.
+
+        Args:
+            question:      The user's natural-language question.
+            name_rel_pairs: List of (entity_name, candidate_relation_list) tuples,
+                            one entry per entity.
+
+        Returns:
+            List of pruned relation lists, same length and order as
+            ``name_rel_pairs``.  An empty list at position *i* means the LLM
+            selected nothing for that entity.
+        """
+        system_prompt = TOG_BATCH_RELATION_PRUNE_SYSTEM_PROMPT.format(
+            beam_width=self._beam_width
+        )
+        user_prompt = tog_batch_relation_prune_user_prompt(
+            question, name_rel_pairs, self._beam_width
+        )
+        result: _BatchRelationPruneResult = await self._llm.generate_structured(
+            prompt=user_prompt,
+            response_model=_BatchRelationPruneResult,
+            system_prompt=system_prompt,
+        )
+        idx_to_rels: dict[int, list[str]] = {}
+        if result and result.results:
+            for entry in result.results:
+                sorted_rels = sorted(entry.relations, key=lambda r: r.score, reverse=True)
+                idx_to_rels[entry.idx] = [sr.relation for sr in sorted_rels[: self._beam_width]]
+        return [idx_to_rels.get(i, []) for i in range(len(name_rel_pairs))]
+
+    async def _entity_prune_batch(
+        self,
+        question: str,
+        path_candidates: list[tuple[dict[str, Any], list[dict[str, Any]]]],
+    ) -> list[dict[str, Any] | None]:
+        """Prune and select entities for all paths in a single LLM call (Step D).
+
+        Replaces the ``asyncio.gather`` fan-out over ``_entity_prune`` with
+        one batched request, eliminating per-path network round-trips.
+
+        Args:
+            question:        The user's natural-language question.
+            path_candidates: List of (pending_path_dict, candidate_entity_dicts)
+                             tuples, one entry per pending path.
+
+        Returns:
+            List of finalised path dicts (or ``None`` if the LLM selected
+            nothing), same length and order as ``path_candidates``.
+        """
+        rel_name_pairs = [
+            (pending["relations"][-1], [c["name"] for c in candidates])
+            for pending, candidates in path_candidates
+        ]
+        user_prompt = tog_batch_entity_prune_user_prompt(question, rel_name_pairs)
+        result: _BatchEntityPruneResult = await self._llm.generate_structured(
+            prompt=user_prompt,
+            response_model=_BatchEntityPruneResult,
+            system_prompt=TOG_BATCH_ENTITY_PRUNE_SYSTEM_PROMPT,
+        )
+        idx_to_name: dict[int, str] = {}
+        if result and result.results:
+            for entry in result.results:
+                if entry.entities:
+                    best = max(entry.entities, key=lambda e: e.score)
+                    idx_to_name[entry.idx] = best.entity
+
+        new_paths: list[dict[str, Any] | None] = []
+        for i, (pending, candidates) in enumerate(path_candidates):
+            selected_name = idx_to_name.get(i)
+            if selected_name is None:
+                new_paths.append(None)
+                continue
+            selected_dict = next(
+                (c for c in candidates if c["name"].lower() == selected_name.lower()),
+                {"id": selected_name, "name": selected_name, "source_chunk_id": "", "edge_chunk_id": ""},
+            )
+            new_paths.append({
+                "nodes": pending["nodes"] + [selected_dict],
+                "relations": list(pending["relations"]),
+                "edge_chunk_ids": list(pending["edge_chunk_ids"]) + [selected_dict.get("edge_chunk_id", "")],
+            })
+        return new_paths
+
     async def _check_reasoning(
         self,
         question: str,
@@ -768,40 +863,45 @@ class ToGRRetriever(ToGRetriever):
                      Defaults to :data:`~app.prompts.TOG_DEFAULT_EXAMPLES`.
     """
 
-    async def _entity_prune(
+    async def _entity_prune_batch(
         self,
         question: str,
-        relation: str,
-        candidates: list[str],
-        path: dict[str, Any],
-    ) -> str | None:
-        """Randomly sample one entity from the candidates (Phase 2, Step D).
+        path_candidates: list[tuple[dict[str, Any], list[dict[str, Any]]]],
+    ) -> list[dict[str, Any] | None]:
+        """Randomly select one entity per path (Phase 2, Step D) — no LLM calls.
 
-        Replaces the LLM-based scoring of :class:`ToGRetriever` with a
-        uniform random draw, eliminating one LLM call per candidate set.
+        Overrides :meth:`ToGRetriever._entity_prune_batch` to use uniform
+        random sampling instead of LLM scoring, keeping Step D cost at O(1)
+        regardless of the number of pending paths.
 
         If the candidate pool is smaller than ``beam_width``, the full pool
         is used; otherwise ``beam_width`` entities are sampled and one is
         chosen from that sample uniformly at random.
 
         Args:
-            question:   The user's natural-language question (unused — present
-                        only to satisfy the overridden method signature).
-            relation:   The relation label being traversed (unused — present
-                        only to satisfy the overridden method signature).
-            candidates: Candidate entity names reachable via ``relation``.
-            path:       The pending path dict being extended (unused — present
-                        only to satisfy the overridden method signature).
+            question:        Unused — present only to satisfy the overridden
+                             method signature.
+            path_candidates: List of (pending_path_dict, candidate_entity_dicts)
+                             tuples.
 
         Returns:
-            A randomly chosen entity name, or ``None`` if ``candidates`` is
-            empty.
+            List of finalised path dicts (or ``None`` for empty candidate
+            sets), same length and order as ``path_candidates``.
         """
-        if not candidates:
-            return None
-        pool = (
-            candidates
-            if len(candidates) <= self._beam_width
-            else random.sample(candidates, self._beam_width)
-        )
-        return random.choice(pool)
+        new_paths: list[dict[str, Any] | None] = []
+        for pending, candidates in path_candidates:
+            if not candidates:
+                new_paths.append(None)
+                continue
+            pool = (
+                candidates
+                if len(candidates) <= self._beam_width
+                else random.sample(candidates, self._beam_width)
+            )
+            selected = random.choice(pool)
+            new_paths.append({
+                "nodes": pending["nodes"] + [selected],
+                "relations": list(pending["relations"]),
+                "edge_chunk_ids": list(pending["edge_chunk_ids"]) + [selected.get("edge_chunk_id", "")],
+            })
+        return new_paths

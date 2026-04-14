@@ -14,7 +14,8 @@ import logging
 import re
 from typing import Any
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from app.core.entity_extractor import BaseEntityExtractor
 from app.prompts import EXTRACTION_SYSTEM_PROMPT, extraction_user_prompt
@@ -35,11 +36,8 @@ class GeminiEntityExtractor(BaseEntityExtractor):
     """
 
     def __init__(self, api_key: str, model_name: str = "gemini-2.5-pro") -> None:
-        genai.configure(api_key=api_key)
-        self._model = genai.GenerativeModel(
-            model_name=model_name,
-            system_instruction=EXTRACTION_SYSTEM_PROMPT,
-        )
+        self._client = genai.Client(api_key=api_key)
+        self._model_name = model_name
 
     # ------------------------------------------------------------------
     # BaseEntityExtractor interface
@@ -59,12 +57,15 @@ class GeminiEntityExtractor(BaseEntityExtractor):
         """
         user_msg = extraction_user_prompt(text, processing_instruction)
         try:
-            response = await self._model.generate_content_async(
-                user_msg,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=0.0,
-                    response_mime_type="application/json",
-                ),
+            config = types.GenerateContentConfig(
+                temperature=0.0,
+                response_mime_type="application/json",
+                system_instruction=EXTRACTION_SYSTEM_PROMPT,
+            )
+            response = await self._client.aio.models.generate_content(
+                model=self._model_name,
+                contents=user_msg,
+                config=config,
             )
             return self._parse_response(response.text)
         except Exception as exc:  # noqa: BLE001

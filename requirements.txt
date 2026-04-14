@@ -13,7 +13,7 @@ instructor>=1.2.0
 # LLM providers (add as needed)
 openai>=1.14.0          # used by instructor's default integration
 ollama>=0.2.0           # Ollama async client (local LLMs + embeddings)
-google-generativeai>=0.5.0  # Gemini LLM + entity extraction
+google-genai>=1.0.0         # Gemini LLM + entity extraction (truly async httpx client)
 
 # Document processing
 pypdf>=4.0.0            # PDF text extraction (no OCR, plain-text only)

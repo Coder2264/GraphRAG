@@ -627,6 +627,107 @@ def tog_generate_user_prompt(
 
 
 # ---------------------------------------------------------------------------
+# ToG E.3.1b — Batched relation pruning (all entities in one LLM call)
+# ---------------------------------------------------------------------------
+
+# Call .format(beam_width=N) before use.
+TOG_BATCH_RELATION_PRUNE_SYSTEM_PROMPT = """\
+You are a graph reasoning assistant helping answer a question by \
+traversing a knowledge graph.
+
+Your task: Given a question and several topic entities (each with candidate \
+relations), select the relations most likely to lead toward the answer for \
+EACH entity. Score each selected relation from 0 to 1 (scores per entity \
+must sum to 1).
+
+Rules:
+- Return ONLY a JSON object:
+  {{"results": [{{"idx": 0, "relations": [{{"relation": "...", "score": 0.X}}, ...]}}, ...]}}
+- For each entity, select between 1 and {beam_width} relations.
+- Scores per entity must sum to 1.0 (rounded to 2 decimal places).
+- Include one entry per entity idx (0-based), in the same order as the input.
+- Do NOT wrap in markdown or add text outside the JSON.\
+"""
+
+
+def tog_batch_relation_prune_user_prompt(
+    question: str,
+    entity_relation_pairs: list[tuple[str, list[str]]],
+    beam_width: int,
+) -> str:
+    """Build the batched user prompt for relation pruning (all entities, one call).
+
+    Args:
+        question:             The user's natural-language question.
+        entity_relation_pairs: List of (entity_name, relation_list) tuples.
+        beam_width:           Maximum relations to keep per entity.
+
+    Returns:
+        Prompt string with all entities numbered [0], [1], … ready for one
+        LLM call.
+    """
+    lines = [
+        f"Question: {question}",
+        "",
+        f"Select up to {beam_width} relations per entity.",
+        "",
+    ]
+    for idx, (name, rels) in enumerate(entity_relation_pairs):
+        lines.append(f"[{idx}] Entity: {name}")
+        lines.append(f"    Relations: {', '.join(rels)}")
+    lines += ["", "JSON:"]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# ToG E.3.2b — Batched entity pruning (all paths in one LLM call)
+# ---------------------------------------------------------------------------
+
+TOG_BATCH_ENTITY_PRUNE_SYSTEM_PROMPT = """\
+You are a graph reasoning assistant helping answer a question by \
+traversing a knowledge graph.
+
+Your task: Given a question and several reasoning paths (each extended via \
+a relation to candidate entities), score the candidate entities for EACH \
+path. Scores per path must sum to 1.
+
+Rules:
+- Return ONLY a JSON object:
+  {{"results": [{{"idx": 0, "entities": [{{"entity": "...", "score": 0.X}}, ...]}}, ...]}}
+- Scores per path must sum to 1.0 (rounded to 2 decimal places).
+- Include one entry per path idx (0-based), in the same order as the input.
+- Do NOT wrap in markdown or add text outside the JSON.\
+"""
+
+
+def tog_batch_entity_prune_user_prompt(
+    question: str,
+    path_candidates: list[tuple[str, list[str]]],
+) -> str:
+    """Build the batched user prompt for entity pruning (all paths, one call).
+
+    Args:
+        question:        The user's natural-language question.
+        path_candidates: List of (relation_label, candidate_name_list) tuples,
+                         one per pending path.
+
+    Returns:
+        Prompt string with all paths numbered [0], [1], … ready for one
+        LLM call.
+    """
+    lines = [
+        f"Question: {question}",
+        "",
+        "For each path, score the candidate entities reachable via the given relation.",
+        "",
+    ]
+    for idx, (relation, candidates) in enumerate(path_candidates):
+        lines.append(f"[{idx}] Relation: {relation} | Candidates: {', '.join(candidates)}")
+    lines += ["", "JSON:"]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # ToG / ToG-R — QueryService integration prompts
 # ---------------------------------------------------------------------------
 
