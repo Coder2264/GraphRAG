@@ -23,7 +23,9 @@ DIP: Depends on BaseEntityExtractor, BaseDocumentProcessor, BaseGraphStore.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 import uuid
 from collections import defaultdict, deque
 from typing import Any
@@ -237,13 +239,14 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
 
         For short documents (≤ graph_extraction_chunk_size chars) a single
         extraction call is made.  For longer documents the text is split into
-        overlapping chunks; each chunk is extracted independently and the
-        results are merged by normalised entity name so cross-chunk duplicates
-        collapse into a single canonical entity node.
+        overlapping chunks; each chunk is extracted **in parallel** and the
+        results are merged in document order by normalised entity name so
+        cross-chunk duplicates collapse into a single canonical entity node.
 
         Each chunk is also stored in PostgreSQL (with NULL embedding) via
         the optional vector_store so that the ToG retriever can later fetch
-        source text by chunk ID.
+        source text by chunk ID.  The upsert runs concurrently with the LLM
+        extraction call for each chunk.
 
         Args:
             text:                   Full document text.
@@ -259,47 +262,89 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
 
         if len(chunks) <= 1:
             chunk_id = f"{doc_id}__graph_chunk_0"
+            t0 = time.monotonic()
+            logger.info(
+                "GraphRAGIngestionPipeline: [chunk 1/1 id=%s] calling LLM for extraction",
+                chunk_id,
+            )
             if self._vector_store:
-                await self._vector_store.upsert(
-                    doc_id=chunk_id,
-                    vector=None,
-                    metadata={"doc_id": f"{doc_id}__graph", "chunk_index": 0, "total_chunks": 1, "source": ""},
-                    content=text,
+                extract_result, _ = await asyncio.gather(
+                    self._extractor.extract(text, processing_instruction),
+                    self._vector_store.upsert(
+                        doc_id=chunk_id,
+                        vector=None,
+                        metadata={"doc_id": f"{doc_id}__graph", "chunk_index": 0, "total_chunks": 1, "source": ""},
+                        content=text,
+                    ),
                 )
-            result = await self._extractor.extract(text, processing_instruction)
-            entities: list[dict] = result.get("entities", [])
-            relations: list[dict] = result.get("relations", [])
+            else:
+                extract_result = await self._extractor.extract(text, processing_instruction)
+            logger.info(
+                "GraphRAGIngestionPipeline: [chunk 1/1 id=%s] LLM responded in %.1fs",
+                chunk_id, time.monotonic() - t0,
+            )
+            entities: list[dict] = extract_result.get("entities", [])
+            relations: list[dict] = extract_result.get("relations", [])
             for e in entities:
                 e["source_chunk_id"] = chunk_id
             for r in relations:
                 r["source_chunk_id"] = chunk_id
             return entities, relations
 
+        n = len(chunks)
         logger.info(
-            "GraphRAGIngestionPipeline: multi-pass extraction over %d chunks", len(chunks)
+            "GraphRAGIngestionPipeline: multi-pass extraction over %d chunks (parallel)", n
         )
 
+        # ── Parallel extraction ────────────────────────────────────────────
+        # Each chunk runs its LLM extraction concurrently.  The vector_store
+        # upsert is overlapped with the LLM call for each chunk.
+
+        async def _process_chunk(i: int, chunk: str) -> tuple[str, dict]:
+            chunk_id = f"{doc_id}__graph_chunk_{i}"
+            t0 = time.monotonic()
+            logger.info(
+                "GraphRAGIngestionPipeline: [chunk %d/%d id=%s] calling LLM",
+                i + 1, n, chunk_id,
+            )
+            if self._vector_store:
+                extract_result, _ = await asyncio.gather(
+                    self._extractor.extract(chunk, processing_instruction),
+                    self._vector_store.upsert(
+                        doc_id=chunk_id,
+                        vector=None,
+                        metadata={"doc_id": f"{doc_id}__graph", "chunk_index": i, "total_chunks": n, "source": ""},
+                        content=chunk,
+                    ),
+                )
+            else:
+                extract_result = await self._extractor.extract(chunk, processing_instruction)
+            logger.info(
+                "GraphRAGIngestionPipeline: [chunk %d/%d id=%s] LLM responded in %.1fs — "
+                "%d entities, %d relations",
+                i + 1, n, chunk_id, time.monotonic() - t0,
+                len(extract_result.get("entities", [])),
+                len(extract_result.get("relations", [])),
+            )
+            return chunk_id, extract_result
+
+        t_all = time.monotonic()
+        chunk_results: list[tuple[str, dict]] = list(
+            await asyncio.gather(*[_process_chunk(i, chunk) for i, chunk in enumerate(chunks)])
+        )
+        logger.info(
+            "GraphRAGIngestionPipeline: all %d chunks extracted in %.1fs (wall time)",
+            n, time.monotonic() - t_all,
+        )
+
+        # ── Merge in document order ────────────────────────────────────────
         # normalised_name → first-seen entity dict (canonical record)
         all_entities: dict[str, dict] = {}
         # normalised_name → canonical slug id chosen on first encounter
         name_to_canonical_id: dict[str, str] = {}
         all_relations: list[dict] = []
 
-        for i, chunk in enumerate(chunks):
-            chunk_id = f"{doc_id}__graph_chunk_{i}"
-            logger.info(
-                "GraphRAGIngestionPipeline: extracting chunk %d/%d (id=%s)",
-                i + 1, len(chunks), chunk_id,
-            )
-            if self._vector_store:
-                await self._vector_store.upsert(
-                    doc_id=chunk_id,
-                    vector=None,
-                    metadata={"doc_id": f"{doc_id}__graph", "chunk_index": i, "total_chunks": len(chunks), "source": ""},
-                    content=chunk,
-                )
-            result = await self._extractor.extract(chunk, processing_instruction)
-
+        for chunk_id, result in chunk_results:
             chunk_entities: list[dict] = result.get("entities", [])
             chunk_relations: list[dict] = result.get("relations", [])
 

@@ -18,8 +18,10 @@ LSP: Fully substitutable for BaseRetriever.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import random
+import time
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -167,12 +169,9 @@ async def _collect_source_chunks(
                 chunk_ids.append(cid)
         if len(chunk_ids) >= 3:
             break
-    chunks: list[str] = []
-    for cid in chunk_ids[:3]:
-        record = await vector_store.get(cid)
-        if record and record.get("content"):
-            chunks.append(record["content"][:1500])
-    return chunks
+    ids_to_fetch = chunk_ids[:3]
+    records = await asyncio.gather(*[vector_store.get(cid) for cid in ids_to_fetch])
+    return [r["content"][:1500] for r in records if r and r.get("content")]
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +252,7 @@ class ToGRetriever(BaseRetriever):
             the generated answer string and ``sources`` are the entity IDs of
             every node visited during graph traversal.
         """
+        t_total = time.monotonic()
         logger.info("ToGRetriever: starting for query=%r", query)
 
         # ── Phase 1: Topic entity extraction ───────────────────────────────
@@ -267,28 +267,38 @@ class ToGRetriever(BaseRetriever):
             answer = await self._llm.generate(prompt=query)
             return RetrievalResult(context=answer, sources=[])
 
-        # Resolve entity name strings → graph node dicts via search_nodes.
+        # Resolve entity name strings → graph node dicts via search_nodes in parallel.
         # Stored node IDs are "{doc_id}__slug"; querying by raw name would miss them.
-        topic_entities: list[dict[str, Any]] = []
-        for name in topic_entity_names:
+        t1 = time.monotonic()
+        logger.info(
+            "ToGRetriever [Phase 1]: resolving %d topic entities from graph (parallel)",
+            len(topic_entity_names),
+        )
+
+        async def _resolve_entity(name: str) -> dict[str, Any]:
             matches = await self._graph_store.search_nodes(name, top_k=2)
             if matches:
                 best = matches[0]
-                topic_entities.append({
+                entity = {
                     "id": best.get("id", name),
                     "name": best.get("name", name),
                     "source_chunk_id": best.get("source_chunk_id", ""),
-                })
+                }
                 logger.info(
-                    "ToGRetriever [Phase 1]: resolved %r → id=%r",
-                    name, best.get("id", name),
+                    "ToGRetriever [Phase 1]: resolved %r → id=%r", name, entity["id"]
                 )
-            else:
-                logger.warning(
-                    "ToGRetriever [Phase 1]: no graph node found for %r — using name as ID",
-                    name,
-                )
-                topic_entities.append({"id": name, "name": name, "source_chunk_id": ""})
+                return entity
+            logger.warning(
+                "ToGRetriever [Phase 1]: no graph node found for %r — using name as ID", name
+            )
+            return {"id": name, "name": name, "source_chunk_id": ""}
+
+        topic_entities: list[dict[str, Any]] = list(
+            await asyncio.gather(*[_resolve_entity(n) for n in topic_entity_names])
+        )
+        logger.info(
+            "ToGRetriever [Phase 1]: entity resolution done in %.1fs", time.monotonic() - t1
+        )
 
         # Initialise beam: one single-node path per topic entity.
         # Invariant: len(path["nodes"]) == len(path["relations"]) + 1
@@ -302,42 +312,61 @@ class ToGRetriever(BaseRetriever):
         answer: str | None = None
 
         for depth in range(1, self._depth_max + 1):
+            t_depth = time.monotonic()
             logger.info("ToGRetriever: exploration depth=%d / %d", depth, self._depth_max)
 
             # E^{D-1}: tail entity dict of each current path (last node).
-            tail_dicts: list[dict[str, Any]] = [p["nodes"][-1] for p in paths]
+            # Deduplicate by entity ID so we don't fetch the same entity twice.
+            unique_tails: dict[str, dict[str, Any]] = {}
+            for p in paths:
+                td = p["nodes"][-1]
+                unique_tails.setdefault(td["id"], td)
 
-            # ── Step A: Relation search ──────────────────────────────────
-            # Retrieve all candidate relations for each unique tail entity ID.
-            entity_relations: dict[str, list[str]] = {}
-            seen_tail_ids: dict[str, dict] = {}
-            for td in tail_dicts:
-                eid = td["id"]
-                if eid in seen_tail_ids:
-                    continue
-                seen_tail_ids[eid] = td
-                relations = await self._graph_store.get_relations(eid)
-                entity_relations[eid] = relations
-                logger.debug(
-                    "ToGRetriever [A]: entity_id=%r → %d relation(s)", eid, len(relations)
-                )
+            # ── Step A: Relation search (parallel) ───────────────────────
+            t_a = time.monotonic()
+            logger.info(
+                "ToGRetriever [A]: fetching relations for %d unique entities (parallel)",
+                len(unique_tails),
+            )
+            relation_lists = await asyncio.gather(
+                *[self._graph_store.get_relations(eid) for eid in unique_tails]
+            )
+            entity_relations: dict[str, list[str]] = dict(
+                zip(unique_tails.keys(), relation_lists)
+            )
+            total_rels = sum(len(r) for r in entity_relations.values())
+            logger.info(
+                "ToGRetriever [A]: done in %.1fs — %d total candidate relations",
+                time.monotonic() - t_a, total_rels,
+            )
 
-            # ── Step B: Relation pruning ──────────────────────────────────
+            # ── Step B: Relation pruning (parallel) ──────────────────────
             # For each entity ask the LLM to score and keep ≤ beam_width relations.
             # Pass the human-readable name to the LLM, not the internal ID.
-            entity_pruned_relations: dict[str, list[str]] = {}
-            for eid, relations in entity_relations.items():
-                if not relations:
-                    entity_pruned_relations[eid] = []
-                    continue
-                entity_name = seen_tail_ids[eid].get("name", eid)
+            entities_with_rels = [(eid, rels) for eid, rels in entity_relations.items() if rels]
+            t_b = time.monotonic()
+            logger.info(
+                "ToGRetriever [B]: pruning relations for %d entities via LLM (parallel)",
+                len(entities_with_rels),
+            )
+
+            async def _prune_one_rel(eid: str, relations: list[str]) -> tuple[str, list[str]]:
+                entity_name = unique_tails[eid].get("name", eid)
                 pruned = await self._prune_relations(query, entity_name, relations)
-                entity_pruned_relations[eid] = pruned
                 logger.debug(
-                    "ToGRetriever [B]: pruned relations for entity_id=%r → %s",
-                    eid,
-                    pruned,
+                    "ToGRetriever [B]: entity_id=%r → pruned to %s", eid, pruned
                 )
+                return eid, pruned
+
+            pruned_pairs = await asyncio.gather(
+                *[_prune_one_rel(eid, rels) for eid, rels in entities_with_rels]
+            )
+            entity_pruned_relations: dict[str, list[str]] = dict(pruned_pairs)
+            for eid in entity_relations:
+                entity_pruned_relations.setdefault(eid, [])
+            logger.info(
+                "ToGRetriever [B]: done in %.1fs", time.monotonic() - t_b
+            )
 
             # Extend each path with each of its tail entity's pruned relations,
             # producing *pending* paths (len(relations) == len(nodes), no new entity yet).
@@ -357,17 +386,23 @@ class ToGRetriever(BaseRetriever):
                 )
                 break
 
-            # ── Step C: Entity search ─────────────────────────────────────
+            # ── Step C: Entity search (parallel) ─────────────────────────
             # For each pending path retrieve candidate entity dicts in both directions.
-            path_candidates: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
-            for pending in pending_paths:
-                tail_dict = pending["nodes"][-1]
-                tail_id = tail_dict["id"]
-                relation = pending["relations"][-1]
+            t_c = time.monotonic()
+            logger.info(
+                "ToGRetriever [C]: entity search for %d pending paths (parallel)",
+                len(pending_paths),
+            )
 
-                tail_results = await self._graph_store.get_tail_entities(tail_id, relation)
-                head_results = await self._graph_store.get_head_entities(tail_id, relation)
-                # Deduplicate by id, tail-direction first.
+            async def _get_candidates(
+                pending: dict[str, Any],
+            ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+                tail_id = pending["nodes"][-1]["id"]
+                relation = pending["relations"][-1]
+                tail_results, head_results = await asyncio.gather(
+                    self._graph_store.get_tail_entities(tail_id, relation),
+                    self._graph_store.get_head_entities(tail_id, relation),
+                )
                 seen_ids: set[str] = set()
                 candidates: list[dict[str, Any]] = []
                 for c in tail_results + head_results:
@@ -376,43 +411,61 @@ class ToGRetriever(BaseRetriever):
                         candidates.append(c)
                 logger.debug(
                     "ToGRetriever [C]: entity_id=%r relation=%r → %d candidate(s)",
-                    tail_id,
-                    relation,
-                    len(candidates),
+                    tail_id, relation, len(candidates),
                 )
-                path_candidates.append((pending, candidates))
+                return pending, candidates
 
-            # ── Step D: Entity pruning ────────────────────────────────────
+            path_candidates: list[tuple[dict[str, Any], list[dict[str, Any]]]] = list(
+                await asyncio.gather(*[_get_candidates(p) for p in pending_paths])
+            )
+            logger.info(
+                "ToGRetriever [C]: done in %.1fs", time.monotonic() - t_c
+            )
+
+            # ── Step D: Entity pruning (parallel) ────────────────────────
             # Pass candidate names to LLM; look up the selected name in candidate dicts.
-            new_paths: list[dict[str, Any]] = []
-            for pending, candidates in path_candidates:
-                if not candidates:
-                    logger.debug(
-                        "ToGRetriever [D]: no candidates for pending path — skipping"
-                    )
-                    continue
+            non_empty_candidates = [(p, c) for p, c in path_candidates if c]
+            t_d = time.monotonic()
+            logger.info(
+                "ToGRetriever [D]: entity pruning for %d candidate sets via LLM (parallel)",
+                len(non_empty_candidates),
+            )
+
+            async def _prune_one_entity(
+                pending: dict[str, Any], candidates: list[dict[str, Any]]
+            ) -> dict[str, Any] | None:
                 relation = pending["relations"][-1]
                 candidate_names = [c["name"] for c in candidates]
                 selected_name = await self._entity_prune(
                     query, relation, candidate_names, pending
                 )
                 if selected_name is None:
-                    continue
-                # Look up the full dict by name (case-insensitive).
+                    return None
                 selected_dict = next(
                     (c for c in candidates if c["name"].lower() == selected_name.lower()),
                     {"id": selected_name, "name": selected_name, "source_chunk_id": "", "edge_chunk_id": ""},
                 )
-                edge_chunk_id = selected_dict.get("edge_chunk_id", "")
-                # Finalise: append selected entity → complete path at depth D.
-                new_path: dict[str, Any] = {
+                return {
                     "nodes": pending["nodes"] + [selected_dict],
                     "relations": list(pending["relations"]),
-                    "edge_chunk_ids": list(pending["edge_chunk_ids"]) + [edge_chunk_id],
+                    "edge_chunk_ids": list(pending["edge_chunk_ids"]) + [selected_dict.get("edge_chunk_id", "")],
                 }
-                new_paths.append(new_path)
-                visited_entities.add(selected_dict["id"])
-                logger.debug("ToGRetriever [D]: finalised path → %s", _format_path(new_path))
+
+            prune_results = await asyncio.gather(
+                *[_prune_one_entity(p, c) for p, c in non_empty_candidates]
+            )
+            new_paths: list[dict[str, Any]] = []
+            for new_path in prune_results:
+                if new_path is not None:
+                    new_paths.append(new_path)
+                    visited_entities.add(new_path["nodes"][-1]["id"])
+                    logger.debug(
+                        "ToGRetriever [D]: finalised path → %s", _format_path(new_path)
+                    )
+            logger.info(
+                "ToGRetriever [D]: done in %.1fs — %d paths finalised",
+                time.monotonic() - t_d, len(new_paths),
+            )
 
             if not new_paths:
                 logger.info(
@@ -427,11 +480,10 @@ class ToGRetriever(BaseRetriever):
             source_chunks = await _collect_source_chunks(paths, self._vector_store)
             sufficient = await self._check_reasoning(query, path_strings, source_chunks)
             logger.info(
-                "ToGRetriever [Phase 3]: depth=%d sufficient=%s paths=%d chunks=%d",
-                depth,
-                sufficient,
-                len(path_strings),
-                len(source_chunks),
+                "ToGRetriever [Phase 3]: depth=%d sufficient=%s paths=%d chunks=%d "
+                "(depth wall time=%.1fs)",
+                depth, sufficient, len(path_strings), len(source_chunks),
+                time.monotonic() - t_depth,
             )
 
             if sufficient:
@@ -457,9 +509,8 @@ class ToGRetriever(BaseRetriever):
                 answer = await self._llm.generate(prompt=query)
 
         logger.info(
-            "ToGRetriever: done; visited=%d entity/entities, answer=%d char(s)",
-            len(visited_entities),
-            len(answer),
+            "ToGRetriever: done — total=%.1fs visited=%d entities answer=%d chars",
+            time.monotonic() - t_total, len(visited_entities), len(answer),
         )
         return RetrievalResult(
             context=answer,
@@ -484,6 +535,8 @@ class ToGRetriever(BaseRetriever):
             List of entity name strings extracted by the LLM, or an empty
             list if the structured output parse failed.
         """
+        t0 = time.monotonic()
+        logger.info("ToGRetriever [Phase 1]: calling LLM for topic entity extraction")
         result: _TopicEntities = await self._llm.generate_structured(
             prompt=question,
             response_model=_TopicEntities,
@@ -492,6 +545,11 @@ class ToGRetriever(BaseRetriever):
                 "key concepts) from the question. "
                 'Return ONLY a JSON object: {"entities": ["entity1", "entity2", ...]}'
             ),
+        )
+        logger.info(
+            "ToGRetriever [Phase 1]: LLM responded in %.1fs → entities=%s",
+            time.monotonic() - t0,
+            result.entities if result else [],
         )
         return result.entities if result and result.entities else []
 
@@ -529,10 +587,18 @@ class ToGRetriever(BaseRetriever):
             beam_width=self._beam_width,
             examples=self._examples,
         )
+        t0 = time.monotonic()
+        logger.debug(
+            "ToGRetriever [B]: calling LLM for relation pruning (entity=%r, %d relations)",
+            entity, len(relations),
+        )
         result: _RelationPruneResult = await self._llm.generate_structured(
             prompt=user_prompt,
             response_model=_RelationPruneResult,
             system_prompt=system_prompt,
+        )
+        logger.debug(
+            "ToGRetriever [B]: LLM responded in %.2fs (entity=%r)", time.monotonic() - t0, entity
         )
         if not result or not result.relations:
             return []
@@ -572,10 +638,18 @@ class ToGRetriever(BaseRetriever):
             entities=candidates,
             examples=self._examples,
         )
+        t0 = time.monotonic()
+        logger.debug(
+            "ToGRetriever [D]: calling LLM for entity pruning (relation=%r, %d candidates)",
+            relation, len(candidates),
+        )
         result: _EntityPruneResult = await self._llm.generate_structured(
             prompt=user_prompt,
             response_model=_EntityPruneResult,
             system_prompt=TOG_ENTITY_PRUNE_SYSTEM_PROMPT,
+        )
+        logger.debug(
+            "ToGRetriever [D]: LLM responded in %.2fs (relation=%r)", time.monotonic() - t0, relation
         )
         if not result or not result.entities:
             return None
@@ -610,9 +684,17 @@ class ToGRetriever(BaseRetriever):
             examples=self._examples,
             source_chunks=source_chunks or [],
         )
+        t0 = time.monotonic()
+        logger.info(
+            "ToGRetriever [Phase 3]: calling LLM for reasoning check (%d paths)", len(path_strings)
+        )
         response = await self._llm.generate(
             prompt=user_prompt,
             system_prompt=TOG_REASONING_SYSTEM_PROMPT,
+        )
+        logger.info(
+            "ToGRetriever [Phase 3]: LLM responded in %.1fs → %r",
+            time.monotonic() - t0, response.strip()[:30],
         )
         return response.strip().lower().startswith("yes")
 
@@ -642,10 +724,18 @@ class ToGRetriever(BaseRetriever):
             examples=self._examples,
             source_chunks=source_chunks or [],
         )
-        return await self._llm.generate(
+        t0 = time.monotonic()
+        logger.info(
+            "ToGRetriever [Phase 4]: calling LLM for answer generation (%d paths)", len(path_strings)
+        )
+        answer = await self._llm.generate(
             prompt=user_prompt,
             system_prompt=TOG_GENERATE_SYSTEM_PROMPT,
         )
+        logger.info(
+            "ToGRetriever [Phase 4]: LLM responded in %.1fs", time.monotonic() - t0
+        )
+        return answer
 
 
 # ---------------------------------------------------------------------------

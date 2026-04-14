@@ -191,13 +191,13 @@ class Neo4jGraphStore(BaseGraphStore):
         async with self._driver.session(database=self._database) as session:
             result = await session.run(
                 """
-                CALL db.index.fulltext.queryNodes("entitySearch", $query)
+                CALL db.index.fulltext.queryNodes("entitySearch", $search_query)
                 YIELD node, score
                 RETURN properties(node) AS props
                 ORDER BY score DESC
                 LIMIT $top_k
                 """,
-                query=query,
+                search_query=query,
                 top_k=top_k,
             )
             records = await result.data()
