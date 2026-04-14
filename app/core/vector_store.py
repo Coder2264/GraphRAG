@@ -40,7 +40,7 @@ class BaseVectorStore(ABC):
     async def upsert(
         self,
         doc_id: str,
-        vector: list[float],
+        vector: list[float] | None,
         metadata: dict[str, Any],
         content: str = "",
     ) -> None:
@@ -49,7 +49,8 @@ class BaseVectorStore(ABC):
 
         Args:
             doc_id:   Unique document identifier.
-            vector:   Embedding vector.
+            vector:   Embedding vector. Pass None to store a text-only row
+                      (e.g. graph extraction chunks that don't need ANN search).
             metadata: Arbitrary metadata to store alongside the vector.
             content:  Optional raw text chunk (useful for retrieval display).
         """

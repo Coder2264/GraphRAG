@@ -125,7 +125,7 @@ class PostgresVectorStore(BaseVectorStore):
     async def upsert(
         self,
         doc_id: str,
-        vector: list[float],
+        vector: list[float] | None,
         metadata: dict[str, Any],
         content: str = "",
     ) -> None:
@@ -134,6 +134,8 @@ class PostgresVectorStore(BaseVectorStore):
 
         `doc_id` here is the chunk_id (e.g. "{parent_doc_id}__chunk_{i}").
         Known metadata fields are extracted into their respective columns.
+        When `vector` is None the embedding column is stored as NULL — the row
+        is accessible via get() but skipped by ivfflat ANN index searches.
         """
         assert self._pool, "Call connect() first."
         import numpy as np
@@ -142,6 +144,7 @@ class PostgresVectorStore(BaseVectorStore):
         chunk_index   = int(metadata.get("chunk_index", 0))
         total_chunks  = int(metadata.get("total_chunks", 1))
         source        = str(metadata.get("source", ""))
+        embedding_val = np.array(vector, dtype=np.float32) if vector is not None else None
 
         async with self._pool.acquire() as conn:
             await self._register_vector_codec(conn)
@@ -164,7 +167,7 @@ class PostgresVectorStore(BaseVectorStore):
                 total_chunks,
                 source,
                 content,
-                np.array(vector, dtype=np.float32),
+                embedding_val,
             )
 
     async def delete(self, doc_id: str) -> None:

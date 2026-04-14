@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from app.core.graph_store import BaseGraphStore
 from app.core.llm import BaseLLM
 from app.core.retriever import BaseRetriever, RetrievalResult
+from app.core.vector_store import BaseVectorStore
 from app.prompts import (
     TOG_DEFAULT_EXAMPLES,
     TOG_ENTITY_PRUNE_SYSTEM_PROMPT,
@@ -84,10 +85,11 @@ class _EntityPruneResult(BaseModel):
 # ---------------------------------------------------------------------------
 
 # Internal path representation:
-#   {"nodes": list[str], "relations": list[str]}
+#   {"nodes": list[dict], "relations": list[str], "edge_chunk_ids": list[str]}
+#   node dict: {"id": str, "name": str, "source_chunk_id": str}
+#   edge_chunk_ids[i] = source_chunk_id of the edge between nodes[i] and nodes[i+1]
 #   Invariant for a *complete* path: len(nodes) == len(relations) + 1
 #   A path of depth D has D+1 nodes and D relations.
-#   Example (depth 2): {"nodes": ["e0", "e1", "e2"], "relations": ["r1", "r2"]}
 #
 # During Step B→D of Phase 2, paths temporarily exist in a *pending* state where
 #   len(relations) == len(nodes)  (one extra relation, tail entity not yet chosen).
@@ -102,16 +104,21 @@ def _format_path(path: dict[str, Any]) -> str:
     triples, matching the paper's best-performing context format.
 
     Args:
-        path: Dict with keys ``"nodes"`` (``list[str]``) and
+        path: Dict with keys ``"nodes"`` (``list[dict]``) and
               ``"relations"`` (``list[str]``), satisfying
               ``len(nodes) == len(relations) + 1``.
+              Each node dict must have a ``"name"`` key.
 
     Returns:
         Formatted string, e.g.
         ``"(node0, rel0, node1), (node1, rel1, node2)"``
         or just ``"node0"`` when ``len(nodes) == 1``.
     """
-    nodes: list[str] = path.get("nodes", [])
+    raw_nodes = path.get("nodes", [])
+    nodes: list[str] = [
+        n.get("name", str(n)) if isinstance(n, dict) else str(n)
+        for n in raw_nodes
+    ]
     relations: list[str] = path.get("relations", [])
 
     if not nodes:
@@ -124,6 +131,48 @@ def _format_path(path: dict[str, Any]) -> str:
         for i, rel in enumerate(relations)
     ]
     return ", ".join(triples)
+
+
+async def _collect_source_chunks(
+    paths: list[dict[str, Any]],
+    vector_store: BaseVectorStore | None,
+) -> list[str]:
+    """Fetch up to 3 unique non-empty source chunk texts for the given paths.
+
+    Collects chunk IDs from node source_chunk_id and edge_chunk_ids, then
+    fetches the content from the vector store (PostgreSQL).  Caps at 3 chunks
+    × 1500 chars each to bound prompt size.
+
+    Args:
+        paths:        List of complete path dicts.
+        vector_store: The vector store to fetch chunk text from.
+                      Returns empty list when None.
+
+    Returns:
+        List of chunk text strings (up to 3, each truncated to 1500 chars).
+    """
+    if vector_store is None:
+        return []
+    seen_ids: set[str] = set()
+    chunk_ids: list[str] = []
+    for path in paths:
+        for node in path.get("nodes", []):
+            cid = node.get("source_chunk_id", "") if isinstance(node, dict) else ""
+            if cid and cid not in seen_ids:
+                seen_ids.add(cid)
+                chunk_ids.append(cid)
+        for cid in path.get("edge_chunk_ids", []):
+            if cid and cid not in seen_ids:
+                seen_ids.add(cid)
+                chunk_ids.append(cid)
+        if len(chunk_ids) >= 3:
+            break
+    chunks: list[str] = []
+    for cid in chunk_ids[:3]:
+        record = await vector_store.get(cid)
+        if record and record.get("content"):
+            chunks.append(record["content"][:1500])
+    return chunks
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +221,7 @@ class ToGRetriever(BaseRetriever):
         beam_width: int = 3,
         depth_max: int = 3,
         examples: list[dict] | None = None,
+        vector_store: BaseVectorStore | None = None,
     ) -> None:
         self._graph_store = graph_store
         self._llm = llm
@@ -180,6 +230,7 @@ class ToGRetriever(BaseRetriever):
         self._examples: list[dict] = (
             examples if examples is not None else TOG_DEFAULT_EXAMPLES
         )
+        self._vector_store = vector_store
 
     # ------------------------------------------------------------------
     # BaseRetriever interface
@@ -206,22 +257,46 @@ class ToGRetriever(BaseRetriever):
 
         # ── Phase 1: Topic entity extraction ───────────────────────────────
         # P = [] (empty paths); E^0 = topic entities extracted by the LLM.
-        topic_entities = await self._extract_topic_entities(query)
-        logger.info("ToGRetriever: topic entities=%s", topic_entities)
+        topic_entity_names = await self._extract_topic_entities(query)
+        logger.info("ToGRetriever: topic entities=%s", topic_entity_names)
 
-        if not topic_entities:
+        if not topic_entity_names:
             logger.warning(
                 "ToGRetriever: no topic entities found — falling back to LLM-only"
             )
             answer = await self._llm.generate(prompt=query)
             return RetrievalResult(context=answer, sources=[])
 
+        # Resolve entity name strings → graph node dicts via search_nodes.
+        # Stored node IDs are "{doc_id}__slug"; querying by raw name would miss them.
+        topic_entities: list[dict[str, Any]] = []
+        for name in topic_entity_names:
+            matches = await self._graph_store.search_nodes(name, top_k=2)
+            if matches:
+                best = matches[0]
+                topic_entities.append({
+                    "id": best.get("id", name),
+                    "name": best.get("name", name),
+                    "source_chunk_id": best.get("source_chunk_id", ""),
+                })
+                logger.info(
+                    "ToGRetriever [Phase 1]: resolved %r → id=%r",
+                    name, best.get("id", name),
+                )
+            else:
+                logger.warning(
+                    "ToGRetriever [Phase 1]: no graph node found for %r — using name as ID",
+                    name,
+                )
+                topic_entities.append({"id": name, "name": name, "source_chunk_id": ""})
+
         # Initialise beam: one single-node path per topic entity.
         # Invariant: len(path["nodes"]) == len(path["relations"]) + 1
         paths: list[dict[str, Any]] = [
-            {"nodes": [entity], "relations": []} for entity in topic_entities
+            {"nodes": [e], "relations": [], "edge_chunk_ids": []}
+            for e in topic_entities
         ]
-        visited_entities: set[str] = set(topic_entities)
+        visited_entities: set[str] = {e["id"] for e in topic_entities}
 
         # ── Phase 2: Iterative exploration ──────────────────────────────────
         answer: str | None = None
@@ -229,31 +304,38 @@ class ToGRetriever(BaseRetriever):
         for depth in range(1, self._depth_max + 1):
             logger.info("ToGRetriever: exploration depth=%d / %d", depth, self._depth_max)
 
-            # E^{D-1}: tail entity of each current path (last node).
-            tail_entities: list[str] = [p["nodes"][-1] for p in paths]
+            # E^{D-1}: tail entity dict of each current path (last node).
+            tail_dicts: list[dict[str, Any]] = [p["nodes"][-1] for p in paths]
 
             # ── Step A: Relation search ──────────────────────────────────
-            # Retrieve all candidate relations for each unique tail entity.
+            # Retrieve all candidate relations for each unique tail entity ID.
             entity_relations: dict[str, list[str]] = {}
-            for entity in dict.fromkeys(tail_entities):  # deduplicate, preserve order
-                relations = await self._graph_store.get_relations(entity)
-                entity_relations[entity] = relations
+            seen_tail_ids: dict[str, dict] = {}
+            for td in tail_dicts:
+                eid = td["id"]
+                if eid in seen_tail_ids:
+                    continue
+                seen_tail_ids[eid] = td
+                relations = await self._graph_store.get_relations(eid)
+                entity_relations[eid] = relations
                 logger.debug(
-                    "ToGRetriever [A]: entity=%r → %d relation(s)", entity, len(relations)
+                    "ToGRetriever [A]: entity_id=%r → %d relation(s)", eid, len(relations)
                 )
 
             # ── Step B: Relation pruning ──────────────────────────────────
             # For each entity ask the LLM to score and keep ≤ beam_width relations.
+            # Pass the human-readable name to the LLM, not the internal ID.
             entity_pruned_relations: dict[str, list[str]] = {}
-            for entity, relations in entity_relations.items():
+            for eid, relations in entity_relations.items():
                 if not relations:
-                    entity_pruned_relations[entity] = []
+                    entity_pruned_relations[eid] = []
                     continue
-                pruned = await self._prune_relations(query, entity, relations)
-                entity_pruned_relations[entity] = pruned
+                entity_name = seen_tail_ids[eid].get("name", eid)
+                pruned = await self._prune_relations(query, entity_name, relations)
+                entity_pruned_relations[eid] = pruned
                 logger.debug(
-                    "ToGRetriever [B]: pruned relations for entity=%r → %s",
-                    entity,
+                    "ToGRetriever [B]: pruned relations for entity_id=%r → %s",
+                    eid,
                     pruned,
                 )
 
@@ -261,14 +343,13 @@ class ToGRetriever(BaseRetriever):
             # producing *pending* paths (len(relations) == len(nodes), no new entity yet).
             pending_paths: list[dict[str, Any]] = []
             for path in paths:
-                tail = path["nodes"][-1]
-                for rel in entity_pruned_relations.get(tail, []):
-                    pending_paths.append(
-                        {
-                            "nodes": list(path["nodes"]),
-                            "relations": list(path["relations"]) + [rel],
-                        }
-                    )
+                tail_id = path["nodes"][-1]["id"]
+                for rel in entity_pruned_relations.get(tail_id, []):
+                    pending_paths.append({
+                        "nodes": list(path["nodes"]),
+                        "relations": list(path["relations"]) + [rel],
+                        "edge_chunk_ids": list(path["edge_chunk_ids"]),
+                    })
 
             if not pending_paths:
                 logger.info(
@@ -277,51 +358,60 @@ class ToGRetriever(BaseRetriever):
                 break
 
             # ── Step C: Entity search ─────────────────────────────────────
-            # For each pending path retrieve candidate entities in both directions.
-            path_candidates: list[tuple[dict[str, Any], list[str]]] = []
+            # For each pending path retrieve candidate entity dicts in both directions.
+            path_candidates: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
             for pending in pending_paths:
-                tail_entity = pending["nodes"][-1]  # last confirmed node
-                relation = pending["relations"][-1]  # the newly appended relation
+                tail_dict = pending["nodes"][-1]
+                tail_id = tail_dict["id"]
+                relation = pending["relations"][-1]
 
-                tail_results: list[str] = await self._graph_store.get_tail_entities(
-                    tail_entity, relation
-                )
-                head_results: list[str] = await self._graph_store.get_head_entities(
-                    tail_entity, relation
-                )
-                # Deduplicate while preserving order (tail-direction first).
-                candidates: list[str] = list(
-                    dict.fromkeys(tail_results + head_results)
-                )
+                tail_results = await self._graph_store.get_tail_entities(tail_id, relation)
+                head_results = await self._graph_store.get_head_entities(tail_id, relation)
+                # Deduplicate by id, tail-direction first.
+                seen_ids: set[str] = set()
+                candidates: list[dict[str, Any]] = []
+                for c in tail_results + head_results:
+                    if c["id"] not in seen_ids:
+                        seen_ids.add(c["id"])
+                        candidates.append(c)
                 logger.debug(
-                    "ToGRetriever [C]: entity=%r relation=%r → %d candidate(s)",
-                    tail_entity,
+                    "ToGRetriever [C]: entity_id=%r relation=%r → %d candidate(s)",
+                    tail_id,
                     relation,
                     len(candidates),
                 )
                 path_candidates.append((pending, candidates))
 
             # ── Step D: Entity pruning ────────────────────────────────────
-            # Ask the LLM to score candidates; keep the top-scored entity per path.
+            # Pass candidate names to LLM; look up the selected name in candidate dicts.
             new_paths: list[dict[str, Any]] = []
             for pending, candidates in path_candidates:
                 if not candidates:
                     logger.debug(
-                        "ToGRetriever [D]: no candidates for pending path %s — skipping",
-                        pending,
+                        "ToGRetriever [D]: no candidates for pending path — skipping"
                     )
                     continue
                 relation = pending["relations"][-1]
-                selected = await self._entity_prune(query, relation, candidates, pending)
-                if selected is None:
+                candidate_names = [c["name"] for c in candidates]
+                selected_name = await self._entity_prune(
+                    query, relation, candidate_names, pending
+                )
+                if selected_name is None:
                     continue
+                # Look up the full dict by name (case-insensitive).
+                selected_dict = next(
+                    (c for c in candidates if c["name"].lower() == selected_name.lower()),
+                    {"id": selected_name, "name": selected_name, "source_chunk_id": "", "edge_chunk_id": ""},
+                )
+                edge_chunk_id = selected_dict.get("edge_chunk_id", "")
                 # Finalise: append selected entity → complete path at depth D.
                 new_path: dict[str, Any] = {
-                    "nodes": pending["nodes"] + [selected],
+                    "nodes": pending["nodes"] + [selected_dict],
                     "relations": list(pending["relations"]),
+                    "edge_chunk_ids": list(pending["edge_chunk_ids"]) + [edge_chunk_id],
                 }
                 new_paths.append(new_path)
-                visited_entities.add(selected)
+                visited_entities.add(selected_dict["id"])
                 logger.debug("ToGRetriever [D]: finalised path → %s", _format_path(new_path))
 
             if not new_paths:
@@ -334,29 +424,37 @@ class ToGRetriever(BaseRetriever):
 
             # ── Phase 3: Reasoning sufficiency check ─────────────────────
             path_strings = [_format_path(p) for p in paths]
-            sufficient = await self._check_reasoning(query, path_strings)
+            source_chunks = await _collect_source_chunks(paths, self._vector_store)
+            sufficient = await self._check_reasoning(query, path_strings, source_chunks)
             logger.info(
-                "ToGRetriever [Phase 3]: depth=%d sufficient=%s paths=%d",
+                "ToGRetriever [Phase 3]: depth=%d sufficient=%s paths=%d chunks=%d",
                 depth,
                 sufficient,
                 len(path_strings),
+                len(source_chunks),
             )
 
             if sufficient:
                 # Phase 4: Generate the final answer from accumulated paths.
-                answer = await self._generate_answer(query, path_strings)
+                answer = await self._generate_answer(query, path_strings, source_chunks)
                 break
             # "No" and depth < depth_max → implicit continue to next iteration.
             # "No" and depth == depth_max → loop ends; fallback applied below.
 
-        # If depth_max reached without a "Yes", generate from LLM-only knowledge
-        # (no paths — per Section 2.1 of the paper).
+        # If depth_max reached without a "Yes", generate with available paths + chunks.
         if answer is None:
-            logger.info(
-                "ToGRetriever: depth limit reached without sufficient context "
-                "— using LLM-only generation"
-            )
-            answer = await self._llm.generate(prompt=query)
+            if paths and any(len(p["nodes"]) > 1 for p in paths):
+                logger.info(
+                    "ToGRetriever: depth limit reached — generating from accumulated paths"
+                )
+                path_strings = [_format_path(p) for p in paths]
+                source_chunks = await _collect_source_chunks(paths, self._vector_store)
+                answer = await self._generate_answer(query, path_strings, source_chunks)
+            else:
+                logger.info(
+                    "ToGRetriever: no traversal completed — falling back to LLM-only"
+                )
+                answer = await self._llm.generate(prompt=query)
 
         logger.info(
             "ToGRetriever: done; visited=%d entity/entities, answer=%d char(s)",
@@ -488,6 +586,7 @@ class ToGRetriever(BaseRetriever):
         self,
         question: str,
         path_strings: list[str],
+        source_chunks: list[str] | None = None,
     ) -> bool:
         """Ask the LLM whether the current paths are sufficient to answer (Phase 3).
 
@@ -496,8 +595,10 @@ class ToGRetriever(BaseRetriever):
         leading/trailing whitespace ignored).
 
         Args:
-            question:     The user's natural-language question.
-            path_strings: Formatted triple-chain strings from all current paths.
+            question:      The user's natural-language question.
+            path_strings:  Formatted triple-chain strings from all current paths.
+            source_chunks: Optional source text excerpts from the document chunks
+                           that produced the entities/edges on the path.
 
         Returns:
             ``True`` if the LLM response starts with "yes" (case-insensitive),
@@ -507,6 +608,7 @@ class ToGRetriever(BaseRetriever):
             question=question,
             paths=path_strings,
             examples=self._examples,
+            source_chunks=source_chunks or [],
         )
         response = await self._llm.generate(
             prompt=user_prompt,
@@ -518,6 +620,7 @@ class ToGRetriever(BaseRetriever):
         self,
         question: str,
         path_strings: list[str],
+        source_chunks: list[str] | None = None,
     ) -> str:
         """Generate the final answer from accumulated reasoning paths (Phase 4).
 
@@ -525,8 +628,10 @@ class ToGRetriever(BaseRetriever):
         which is the best-performing format reported in the paper (Appendix E.3.4).
 
         Args:
-            question:     The user's natural-language question.
-            path_strings: Formatted triple-chain strings from all current paths.
+            question:      The user's natural-language question.
+            path_strings:  Formatted triple-chain strings from all current paths.
+            source_chunks: Optional source text excerpts from the document chunks
+                           that produced the entities/edges on the path.
 
         Returns:
             The LLM-generated answer string.
@@ -535,6 +640,7 @@ class ToGRetriever(BaseRetriever):
             question=question,
             paths=path_strings,
             examples=self._examples,
+            source_chunks=source_chunks or [],
         )
         return await self._llm.generate(
             prompt=user_prompt,

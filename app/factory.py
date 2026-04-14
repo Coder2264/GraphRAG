@@ -200,6 +200,7 @@ class ServiceFactory:
                 document_processor=DefaultDocumentProcessor(),
                 entity_extractor=self._entity_extractor,
                 graph_store=self._graph_store,
+                vector_store=self._vector_store,
             )
         # in_memory graph store — skip real extraction
         return None
@@ -225,6 +226,7 @@ class ServiceFactory:
                 llm=self._llm,
                 beam_width=settings.beam_search_beam_width,
                 depth_max=settings.tog_depth_max,
+                vector_store=self._vector_store,
             )
         if mode == QueryMode.TOG_R:
             from app.implementations.graph_rag.tog_retriever import ToGRRetriever
@@ -233,6 +235,7 @@ class ServiceFactory:
                 llm=self._llm,
                 beam_width=settings.beam_search_beam_width,
                 depth_max=settings.tog_depth_max,
+                vector_store=self._vector_store,
             )
         return NoneRetriever()
 

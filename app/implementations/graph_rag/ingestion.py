@@ -33,6 +33,7 @@ from app.core.document_processor import BaseDocumentProcessor
 from app.core.entity_extractor import BaseEntityExtractor
 from app.core.graph_store import BaseGraphStore
 from app.core.ingestion import BaseIngestionPipeline
+from app.core.vector_store import BaseVectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -67,10 +68,12 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
         document_processor: BaseDocumentProcessor,
         entity_extractor: BaseEntityExtractor,
         graph_store: BaseGraphStore,
+        vector_store: BaseVectorStore | None = None,
     ) -> None:
         self._processor = document_processor
         self._extractor = entity_extractor
         self._graph_store = graph_store
+        self._vector_store = vector_store
 
         # Set after ingest() for the service to read
         self._last_entities_count: int = 0
@@ -126,7 +129,7 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
             "GraphRAG [%s]: starting entity extraction (text length=%d chars)",
             doc_id, len(text),
         )
-        entities, relations = await self._extract_multi_pass(text, processing_instruction)
+        entities, relations = await self._extract_multi_pass(text, processing_instruction, doc_id)
 
         logger.info(
             "GraphRAG [%s]: extracted %d entities, %d relations",
@@ -179,6 +182,7 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
                     "type": entity_type,
                     "description": entity.get("description", ""),
                     "doc_id": doc_id,
+                    "source_chunk_id": entity.get("source_chunk_id", ""),
                 },
             )
 
@@ -196,11 +200,12 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
             relation_type = rel.get("relation", "RELATED_TO")
             if src_local not in entity_id_map or dst_local not in entity_id_map:
                 continue
+            edge_data = {**rel.get("properties", {}), "source_chunk_id": rel.get("source_chunk_id", "")}
             await self._graph_store.add_edge(
                 src_id=entity_id_map[src_local],
                 dst_id=entity_id_map[dst_local],
                 relation=relation_type,
-                data=rel.get("properties", {}),
+                data=edge_data,
             )
 
         self._last_entities_count = len(entities)
@@ -222,6 +227,7 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
         self,
         text: str,
         processing_instruction: str,
+        doc_id: str,
     ) -> tuple[list[dict], list[dict]]:
         """
         Extract entities and relations using overlapping chunks.
@@ -232,9 +238,14 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
         results are merged by normalised entity name so cross-chunk duplicates
         collapse into a single canonical entity node.
 
+        Each chunk is also stored in PostgreSQL (with NULL embedding) via
+        the optional vector_store so that the ToG retriever can later fetch
+        source text by chunk ID.
+
         Args:
             text:                   Full document text.
             processing_instruction: Optional extraction hint passed to the LLM.
+            doc_id:                 Parent document ID; used to build chunk IDs.
 
         Returns:
             (merged_entities, merged_relations)
@@ -244,8 +255,22 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
         chunks = self._split_text(text, chunk_size, overlap)
 
         if len(chunks) <= 1:
+            chunk_id = f"{doc_id}__graph_chunk_0"
+            if self._vector_store:
+                await self._vector_store.upsert(
+                    doc_id=chunk_id,
+                    vector=None,
+                    metadata={"doc_id": f"{doc_id}__graph", "chunk_index": 0, "total_chunks": 1, "source": ""},
+                    content=text,
+                )
             result = await self._extractor.extract(text, processing_instruction)
-            return result.get("entities", []), result.get("relations", [])
+            entities: list[dict] = result.get("entities", [])
+            relations: list[dict] = result.get("relations", [])
+            for e in entities:
+                e["source_chunk_id"] = chunk_id
+            for r in relations:
+                r["source_chunk_id"] = chunk_id
+            return entities, relations
 
         logger.info(
             "GraphRAGIngestionPipeline: multi-pass extraction over %d chunks", len(chunks)
@@ -258,9 +283,18 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
         all_relations: list[dict] = []
 
         for i, chunk in enumerate(chunks):
+            chunk_id = f"{doc_id}__graph_chunk_{i}"
             logger.info(
-                "GraphRAGIngestionPipeline: extracting chunk %d/%d", i + 1, len(chunks)
+                "GraphRAGIngestionPipeline: extracting chunk %d/%d (id=%s)",
+                i + 1, len(chunks), chunk_id,
             )
+            if self._vector_store:
+                await self._vector_store.upsert(
+                    doc_id=chunk_id,
+                    vector=None,
+                    metadata={"doc_id": f"{doc_id}__graph", "chunk_index": i, "total_chunks": len(chunks), "source": ""},
+                    content=chunk,
+                )
             result = await self._extractor.extract(chunk, processing_instruction)
 
             chunk_entities: list[dict] = result.get("entities", [])
@@ -276,6 +310,7 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
                     continue
                 key = name.strip().lower()
                 if key not in all_entities:
+                    entity["source_chunk_id"] = chunk_id  # first-seen chunk owns the entity
                     all_entities[key] = entity
                     name_to_canonical_id[key] = local_id
                 canonical_id = name_to_canonical_id[key]
@@ -285,7 +320,7 @@ class GraphRAGIngestionPipeline(BaseIngestionPipeline):
                 src = local_to_canonical.get(rel.get("src_id", ""))
                 dst = local_to_canonical.get(rel.get("dst_id", ""))
                 if src and dst:
-                    all_relations.append({**rel, "src_id": src, "dst_id": dst})
+                    all_relations.append({**rel, "src_id": src, "dst_id": dst, "source_chunk_id": chunk_id})
 
         # Ensure every entity record carries the canonical id
         merged_entities = list(all_entities.values())

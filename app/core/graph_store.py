@@ -119,6 +119,40 @@ class BaseGraphStore(ABC):
         """
         ...
 
+    @abstractmethod
+    async def get_tail_entities(self, entity_id: str, relation: str) -> list[dict[str, Any]]:
+        """
+        Return entities reachable FROM entity_id via an outgoing relation.
+
+        Args:
+            entity_id: The node's id property (e.g. "{doc_id}__slug").
+            relation:  Relationship type label (e.g. "BORN_IN").
+
+        Returns:
+            List of dicts, each with keys:
+              - id:              The target node's id property.
+              - name:            The target node's name property.
+              - source_chunk_id: ID of the chunk that produced the entity node
+                                 (empty string when absent).
+              - edge_chunk_id:   ID of the chunk that implied this edge
+                                 (empty string when absent).
+        """
+        ...
+
+    @abstractmethod
+    async def get_head_entities(self, entity_id: str, relation: str) -> list[dict[str, Any]]:
+        """
+        Return entities pointing TO entity_id via an incoming relation.
+
+        Args:
+            entity_id: The node's id property (e.g. "{doc_id}__slug").
+            relation:  Relationship type label (e.g. "BORN_IN").
+
+        Returns:
+            Same schema as get_tail_entities.
+        """
+        ...
+
     # ------------------------------------------------------------------
     # Delete operations
     # ------------------------------------------------------------------

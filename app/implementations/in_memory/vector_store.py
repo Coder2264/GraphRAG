@@ -50,7 +50,7 @@ class InMemoryVectorStore(BaseVectorStore):
     async def upsert(
         self,
         doc_id: str,
-        vector: list[float],
+        vector: list[float] | None,
         metadata: dict[str, Any],
         content: str = "",
     ) -> None:
@@ -72,6 +72,9 @@ class InMemoryVectorStore(BaseVectorStore):
         """Brute-force cosine similarity search with optional metadata filtering."""
         candidates = []
         for doc_id, entry in self._store.items():
+            # Skip text-only rows (no embedding vector)
+            if entry["vector"] is None:
+                continue
             if metadata_filter:
                 if not all(entry["metadata"].get(k) == v for k, v in metadata_filter.items()):
                     continue

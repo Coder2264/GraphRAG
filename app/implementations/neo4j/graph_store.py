@@ -175,28 +175,71 @@ class Neo4jGraphStore(BaseGraphStore):
         return [r["relation"] for r in records]
 
     async def search_nodes(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
-        """
-        Full-text search using Neo4j's built-in fulltext index (if available)
-        or fallback to CONTAINS predicate.
-
-        For production, create a fulltext index:
-            CREATE FULLTEXT INDEX nodeSearch FOR (n:Document) ON EACH [n.content_preview]
-        """
-        assert self._driver, "Call connect() first."
+        """Full-text search over Entity nodes using the entitySearch fulltext index."""
+        if not self._driver:
+            return []
         async with self._driver.session(database=self._database) as session:
             result = await session.run(
                 """
-                MATCH (n)
-                WHERE any(key IN keys(n) WHERE toLower(toString(n[key])) CONTAINS toLower($search_query))
-                RETURN properties(n) AS props
+                CALL db.index.fulltext.queryNodes("entitySearch", $query)
+                YIELD node, score
+                RETURN properties(node) AS props
+                ORDER BY score DESC
                 LIMIT $top_k
                 """,
-                search_query=query,
+                query=query,
                 top_k=top_k,
             )
             records = await result.data()
-
         return [dict(r["props"]) for r in records]
+
+    async def get_tail_entities(self, entity_id: str, relation: str) -> list[dict[str, Any]]:
+        """Return entities reachable FROM entity_id via outgoing relation."""
+        if not self._driver:
+            return []
+        escaped_rel = f"`{relation.replace('`', '')}`"
+        query = f"""
+        MATCH (n {{id: $entity_id}})-[r:{escaped_rel}]->(m:Entity)
+        RETURN m.id AS id, m.name AS name,
+               COALESCE(m.source_chunk_id, '') AS source_chunk_id,
+               COALESCE(r.source_chunk_id, '') AS edge_chunk_id
+        """
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(query, entity_id=entity_id)
+            records = await result.data()
+        return [
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "source_chunk_id": r["source_chunk_id"],
+                "edge_chunk_id": r["edge_chunk_id"],
+            }
+            for r in records
+        ]
+
+    async def get_head_entities(self, entity_id: str, relation: str) -> list[dict[str, Any]]:
+        """Return entities pointing TO entity_id via incoming relation."""
+        if not self._driver:
+            return []
+        escaped_rel = f"`{relation.replace('`', '')}`"
+        query = f"""
+        MATCH (m:Entity)-[r:{escaped_rel}]->(n {{id: $entity_id}})
+        RETURN m.id AS id, m.name AS name,
+               COALESCE(m.source_chunk_id, '') AS source_chunk_id,
+               COALESCE(r.source_chunk_id, '') AS edge_chunk_id
+        """
+        async with self._driver.session(database=self._database) as session:
+            result = await session.run(query, entity_id=entity_id)
+            records = await result.data()
+        return [
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "source_chunk_id": r["source_chunk_id"],
+                "edge_chunk_id": r["edge_chunk_id"],
+            }
+            for r in records
+        ]
 
     # ------------------------------------------------------------------
     # Delete

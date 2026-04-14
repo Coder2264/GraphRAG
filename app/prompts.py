@@ -531,17 +531,22 @@ def tog_reasoning_user_prompt(
     question: str,
     paths: list[str],
     examples: list[dict],
+    source_chunks: list[str] | None = None,
 ) -> str:
     """Build the few-shot user prompt for the reasoning-sufficiency check.
 
     Args:
-        question:  The user's natural-language question.
-        paths:     Reasoning paths accumulated so far; each is a
-                   triple-chain string such as
-                   ``"(Canberra, capital of, Australia), (Australia, ...)"``
-        examples:  Few-shot demonstrations; each dict must contain
-                   ``question``, ``paths`` (list of strings), and
-                   ``reasoning_answer`` ("Yes" or "No").
+        question:      The user's natural-language question.
+        paths:         Reasoning paths accumulated so far; each is a
+                       triple-chain string such as
+                       ``"(Canberra, capital of, Australia), (Australia, ...)"``
+        examples:      Few-shot demonstrations; each dict must contain
+                       ``question``, ``paths`` (list of strings), and
+                       ``reasoning_answer`` ("Yes" or "No").
+        source_chunks: Optional source text excerpts from the document chunks
+                       that produced the graph entities/edges on the path.
+                       Appended after the triples so the model can ground
+                       its Yes/No decision in the original source text.
     """
     shots = "\n\n".join(
         f"Q: {ex['question']}\n"
@@ -549,9 +554,14 @@ def tog_reasoning_user_prompt(
         f"A: {ex['reasoning_answer']}"
         for ex in examples
     )
+    excerpts = ""
+    if source_chunks:
+        numbered = "\n".join(f"[{i + 1}] {c}" for i, c in enumerate(source_chunks))
+        excerpts = f"\nSource excerpts:\n{numbered}\n"
     query = (
         f"Q: {question}\n"
         f"Knowledge triples: {chr(10).join(paths)}\n"
+        f"{excerpts}"
         "A:"
     )
     return f"{shots}\n\n{query}" if shots else query
@@ -580,17 +590,22 @@ def tog_generate_user_prompt(
     question: str,
     paths: list[str],
     examples: list[dict],
+    source_chunks: list[str] | None = None,
 ) -> str:
     """Build the few-shot user prompt for final answer generation.
 
     Args:
-        question:  The user's natural-language question.
-        paths:     Reasoning paths accumulated so far; each is a
-                   triple-chain string such as
-                   ``"(Canberra, capital of, Australia), (Australia, ...)"``
-        examples:  Few-shot demonstrations; each dict must contain
-                   ``question``, ``paths`` (list of strings), and
-                   ``answer``.
+        question:      The user's natural-language question.
+        paths:         Reasoning paths accumulated so far; each is a
+                       triple-chain string such as
+                       ``"(Canberra, capital of, Australia), (Australia, ...)"``
+        examples:      Few-shot demonstrations; each dict must contain
+                       ``question``, ``paths`` (list of strings), and
+                       ``answer``.
+        source_chunks: Optional source text excerpts from the document chunks
+                       that produced the graph entities/edges on the path.
+                       Appended after the triples to ground the answer in
+                       the original source text.
     """
     shots = "\n\n".join(
         f"Q: {ex['question']}\n"
@@ -598,9 +613,14 @@ def tog_generate_user_prompt(
         f"A: {ex['answer']}"
         for ex in examples
     )
+    excerpts = ""
+    if source_chunks:
+        numbered = "\n".join(f"[{i + 1}] {c}" for i, c in enumerate(source_chunks))
+        excerpts = f"\nSource excerpts:\n{numbered}\n"
     query = (
         f"Q: {question}\n"
         f"Knowledge triples: {chr(10).join(paths)}\n"
+        f"{excerpts}"
         "A:"
     )
     return f"{shots}\n\n{query}" if shots else query

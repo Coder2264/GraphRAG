@@ -84,12 +84,43 @@ class InMemoryGraphStore(BaseGraphStore):
         )
         return list(dict.fromkeys(relations))
 
+    async def get_tail_entities(self, entity_id: str, relation: str) -> list[dict[str, Any]]:
+        """Return entities reachable FROM entity_id via outgoing relation."""
+        results = []
+        for edge in self._edges:
+            if edge["src"] == entity_id and edge["relation"] == relation:
+                node = self._nodes.get(edge["dst"], {})
+                results.append({
+                    "id": edge["dst"],
+                    "name": node.get("name", edge["dst"]),
+                    "source_chunk_id": node.get("source_chunk_id", ""),
+                    "edge_chunk_id": edge.get("source_chunk_id", ""),
+                })
+        return results
+
+    async def get_head_entities(self, entity_id: str, relation: str) -> list[dict[str, Any]]:
+        """Return entities pointing TO entity_id via incoming relation."""
+        results = []
+        for edge in self._edges:
+            if edge["dst"] == entity_id and edge["relation"] == relation:
+                node = self._nodes.get(edge["src"], {})
+                results.append({
+                    "id": edge["src"],
+                    "name": node.get("name", edge["src"]),
+                    "source_chunk_id": node.get("source_chunk_id", ""),
+                    "edge_chunk_id": edge.get("source_chunk_id", ""),
+                })
+        return results
+
     async def search_nodes(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
-        """Naive substring search over node property values."""
+        """Substring search over name and description of Entity nodes only."""
         results = []
         query_lower = query.lower()
         for node_id, props in self._nodes.items():
-            if any(query_lower in str(v).lower() for v in props.values()):
+            if "Entity" not in props.get("labels", []):
+                continue
+            if (query_lower in str(props.get("name", "")).lower()
+                    or query_lower in str(props.get("description", "")).lower()):
                 results.append({"id": node_id, **props})
                 if len(results) >= top_k:
                     break
