@@ -82,24 +82,27 @@ CRITICAL ENTITY SCATTERING RULE:
 ```
 Generate a synthetic document for GraphRAG benchmark testing.
 
-DOMAIN: corporate_history
-TOPIC: Founding of fictional biotech NeuroGenix and its acquisition chain
-DOCUMENT INDEX: 001
+DOMAIN: 
+TOPIC: 
+DOCUMENT INDEX: 
 
 Requirements:
 1. Exactly 5 sections, each 450-550 words, labeled "## Section N: [Descriptive Title]"
 2. 10-12 named entities total (mix: People, Organizations, Locations, Products, Awards)
 3. CRITICAL — scatter connected facts across NON-ADJACENT sections:
-   - Section 1: Introduce Company X and its founder Person A
-                (do NOT mention where Person A studied)
-   - Section 2: Describe Person A's early career at University Y
-                (do NOT mention who else trained there)
-   - Section 3: Introduce Person B (lead specialist), note their collaboration with Professor C
-                (do NOT mention Professor C's institution)
-   - Section 4: Describe Professor C's lab at Institute Z
-                (do NOT mention who funds Institute Z)
-   - Section 5: Name Institute Z's primary funder Organization W and its director Person D
-   Adapt this pattern to your domain — the STRUCTURE (one hop per section) is mandatory.
+   Adapt these 5 hops to your domain's natural entity types:
+   - Section 1: Introduce Entity-A and its relationship to Entity-B
+                (do NOT mention Entity-B's connection to Entity-C)
+   - Section 2: Establish Entity-B's link to Entity-C
+                (do NOT mention Entity-C's connection to Entity-D)
+   - Section 3: Introduce Entity-C's link to Entity-D
+                (do NOT mention Entity-D's connection to Entity-E)
+   - Section 4: Describe Entity-D and its connection to Entity-E
+                (do NOT mention Entity-E's connection to Entity-F)
+   - Section 5: Reveal Entity-E's link to Entity-F
+   The STRUCTURE (one hop per section, no adjacent hops) is mandatory.
+   Do NOT reuse the corporate/academic naming pattern — use entity types natural to your domain.
+
 4. Include 1-2 plausible distractor sentences near each entity name that are
    semantically similar to the answer but factually wrong — to confuse keyword search.
 5. All names, organizations, and events must be entirely fictional.
@@ -110,8 +113,8 @@ At least 2 pairs should require 3+ hops.
 
 RESPOND WITH THIS EXACT JSON STRUCTURE (no other text):
 {
-  "doc_index": "001",
-  "domain": "corporate_history",
+  "doc_index": "001",  // index matching DOCUMENT INDEX above, zero-padded
+  "domain": "exact domain string",
   "topic": "exact topic string",
   "document_text": "## Section 1: [Title]\n\n[450-550 words]\n\n## Section 2: [Title]\n\n[450-550 words]\n\n## Section 3: [Title]\n\n[450-550 words]\n\n## Section 4: [Title]\n\n[450-550 words]\n\n## Section 5: [Title]\n\n[450-550 words]",
   "entities": [
