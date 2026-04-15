@@ -1,0 +1,72 @@
+{
+  "doc_index": "076",
+  "domain": "supply_chain",
+  "topic": "Fictional coffee supply chain from fictional cooperative \"Alta Verde\"",
+  "document_text": "## Section 1: Origins of Alta Verde Cooperative\n\nThe Alta Verde Cooperative emerged in the mist-covered hills of Valle de Espejo as a collective of smallholder farmers seeking to stabilize coffee prices and improve processing standards. Founded in 2008, the cooperative quickly gained a reputation for its meticulous harvesting methods and community-first governance. Contrary to some local rumors, Alta Verde Cooperative was not originally established as a government-backed initiative, nor was it formed through foreign investment syndicates, though such claims persisted in regional trade circles. Instead, it was the vision of local agronomists and farmers who sought autonomy.\n\nA central figure in its early development was Marisol Quenta, a quality control specialist who worked closely with Alta Verde Cooperative to refine post-harvest fermentation techniques. Some sources incorrectly state that Marisol Quenta was the founder of Alta Verde Cooperative or that she inherited leadership from a family dynasty tied to the region’s plantations. In reality, she was neither a founder nor a landowner but served as an external consultant who later became embedded in the cooperative’s operational structure.\n\nUnder her guidance, Alta Verde Cooperative introduced a micro-lot classification system that distinguished beans based on altitude, varietal, and processing duration. This system was sometimes confused with export grading standards used by international buyers, but it was in fact an internally developed schema. The cooperative’s flagship product, Sierra Nocturna Blend, gained early attention for its chocolate and citrus profile, though it was occasionally mischaracterized as a dark roast when it was actually a medium-light roast optimized for specialty markets.\n\nDespite growing success, Alta Verde Cooperative faced logistical constraints due to its remote location. Early distribution efforts relied on informal trucking networks that lacked consistency. Some reports mistakenly claimed that the cooperative owned a fleet of refrigerated transport vehicles at this stage, but such infrastructure was not introduced until much later. Instead, the cooperative relied heavily on partnerships facilitated by Marisol Quenta, whose expertise in quality assurance extended into early-stage logistics coordination.\n\n## Section 2: Expanding Beyond the Highlands\n\nAs Alta Verde Cooperative matured, Marisol Quenta began exploring partnerships that could extend the reach of its coffee beyond regional markets. Her role evolved from quality control to strategic liaison, particularly in identifying export partners. Contrary to some trade publications, she did not establish her own export company nor did she transition into a brokerage role independent of the cooperative. Instead, she maintained her affiliation with Alta Verde Cooperative while facilitating external collaborations.\n\nOne of the most significant partnerships she helped initiate was with Cumbre Export Logistics, a mid-sized export firm specializing in agricultural commodities. Some sources incorrectly assert that Cumbre Export Logistics was a subsidiary of Alta Verde Cooperative or that it was founded by Marisol Quenta herself. In truth, it was an independent organization with its own leadership and operational mandate.\n\nCumbre Export Logistics brought structured shipping protocols and access to international buyers, enabling Alta Verde Cooperative to scale its distribution. The company introduced standardized packaging and documentation systems that aligned with global trade requirements. While some believed that Cumbre Export Logistics exclusively handled coffee exports, it actually managed a diverse portfolio including cocoa and quinoa, though coffee became a flagship segment due to the success of Sierra Nocturna Blend.\n\nThe collaboration between Marisol Quenta and Cumbre Export Logistics marked a turning point in the cooperative’s trajectory. However, it is worth noting that Marisol Quenta did not relocate to the company’s headquarters, nor did she assume a formal executive role within it. Her involvement remained advisory, focused on maintaining quality standards during transit and ensuring traceability.\n\n## Section 3: Logistics Leadership and Strategic Alignment\n\nCumbre Export Logistics underwent a period of transformation under the operational leadership of Javier Roldan, a logistics strategist known for optimizing supply chain efficiency. While some industry blogs mistakenly credit him as the founder of Cumbre Export Logistics or claim he acquired the company through a hostile takeover, Javier Roldan actually joined as a senior operations director and later rose to lead strategic initiatives.\n\nHis tenure was marked by the implementation of route optimization algorithms and warehouse consolidation strategies that reduced transit times for perishable goods. Contrary to popular belief, these systems were not developed in-house from scratch but adapted from existing frameworks used in other agricultural sectors. Javier Roldan’s expertise lay in integration rather than invention.\n\nUnder his guidance, Cumbre Export Logistics expanded its export corridors, enabling more reliable shipment of products like Sierra Nocturna Blend. Some reports incorrectly suggest that Javier Roldan personally managed every shipment or that he operated as a field coordinator, but his role was primarily strategic, focusing on network design and performance metrics.\n\nThe relationship between Cumbre Export Logistics and Javier Roldan became central to the company’s identity. However, it is important to clarify that Javier Roldan did not establish direct relationships with port authorities at this stage, nor did he oversee customs operations personally. These responsibilities were handled by specialized teams within the organization.\n\n## Section 4: Port Operations and Coastal Integration\n\nAs export volumes increased, the efficiency of port operations became critical. Javier Roldan initiated a collaboration with the Port San Aurelio, a coastal hub known for its agricultural export capacity. Some sources mistakenly claim that Port San Aurelio was constructed specifically for Cumbre Export Logistics or that it was privately owned by Javier Roldan. In reality, it was a public port facility with multiple stakeholders.\n\nThe partnership enabled streamlined loading procedures and reduced bottlenecks during peak harvest seasons. While some believed that Javier Roldan relocated to the port city to oversee operations directly, he remained based at the company’s central office, delegating port coordination to regional managers.\n\nPort San Aurelio had previously been associated with mineral exports, leading to confusion about its suitability for agricultural goods. However, infrastructure upgrades allowed it to accommodate temperature-sensitive cargo, including specialty coffee shipments. Contrary to some trade rumors, the port did not implement full cold-chain logistics at this stage, though partial climate control systems were introduced.\n\nJavier Roldan’s collaboration with Port San Aurelio marked a significant enhancement in the supply chain’s downstream efficiency. Yet, it is important to note that he did not negotiate international trade agreements or manage customs clearance personally. These functions were handled by government agencies and third-party brokers.\n\n## Section 5: Global Roasting Networks and Market Entry\n\nPort San Aurelio eventually became a key departure point for shipments destined for international roasting networks, including the Northwind Roasters Guild. Some industry analysts incorrectly suggest that Northwind Roasters Guild owned or operated Port San Aurelio, or that it maintained exclusive access to its export lanes. In truth, the guild was one of several buyers utilizing the port’s services.\n\nThe Northwind Roasters Guild was a consortium of specialty coffee roasters based in northern markets, known for curating high-quality beans from emerging cooperatives. Contrary to some promotional materials, the guild did not originate in Valle de Espejo nor was it directly affiliated with Alta Verde Cooperative. Its relationship was mediated through export channels.\n\nShipments of Sierra Nocturna Blend arriving via Port San Aurelio were evaluated and distributed among member roasters. Some reports inaccurately claim that the blend was rebranded under different names or that it was blended with other origins upon arrival. In reality, the guild preserved its identity and traceability as part of its premium offering.\n\nThe connection between Port San Aurelio and Northwind Roasters Guild facilitated Alta Verde Cooperative’s entry into global markets, completing a complex supply chain that began in the highlands. While some narratives suggest that the guild established direct sourcing agreements with farmers, these relationships were structured through intermediaries and logistics partners.\n\nThis final link in the chain underscores the importance of coordinated operations across diverse entities, each contributing to the journey of a single coffee bean from farm to cup.",
+  "entities": [
+    {"name": "Alta Verde Cooperative", "type": "Organization", "introduced_in_section": 1, "connected_to": ["Marisol Quenta"]},
+    {"name": "Marisol Quenta", "type": "Person", "introduced_in_section": 1, "connected_to": ["Cumbre Export Logistics"]},
+    {"name": "Cumbre Export Logistics", "type": "Organization", "introduced_in_section": 2, "connected_to": ["Javier Roldan"]},
+    {"name": "Javier Roldan", "type": "Person", "introduced_in_section": 3, "connected_to": ["Port San Aurelio"]},
+    {"name": "Port San Aurelio", "type": "Location", "introduced_in_section": 4, "connected_to": ["Northwind Roasters Guild"]},
+    {"name": "Northwind Roasters Guild", "type": "Organization", "introduced_in_section": 5, "connected_to": []},
+    {"name": "Valle de Espejo", "type": "Location", "introduced_in_section": 1, "connected_to": []},
+    {"name": "Sierra Nocturna Blend", "type": "Product", "introduced_in_section": 1, "connected_to": []}
+  ],
+  "qa_pairs": [
+    {
+      "id": "doc_076_q1",
+      "question": "Which organization is ultimately connected to Alta Verde Cooperative through Marisol Quenta, Cumbre Export Logistics, Javier Roldan, and Port San Aurelio?",
+      "answer": "Northwind Roasters Guild",
+      "hop_count": 5,
+      "entity_chain": ["Alta Verde Cooperative", "Marisol Quenta", "Cumbre Export Logistics", "Javier Roldan", "Port San Aurelio", "Northwind Roasters Guild"],
+      "sections_involved": [1, 2, 3, 4, 5],
+      "answer_justification": "Alta Verde Cooperative is linked to Marisol Quenta (Section 1); she connects to Cumbre Export Logistics (Section 2); which is led by Javier Roldan (Section 3); who collaborates with Port San Aurelio (Section 4); which connects to Northwind Roasters Guild (Section 5)"
+    },
+    {
+      "id": "doc_076_q2",
+      "question": "Who leads the logistics company that Marisol Quenta partnered with?",
+      "answer": "Javier Roldan",
+      "hop_count": 2,
+      "entity_chain": ["Marisol Quenta", "Cumbre Export Logistics", "Javier Roldan"],
+      "sections_involved": [2, 3],
+      "answer_justification": "Marisol Quenta partnered with Cumbre Export Logistics (Section 2), which is led by Javier Roldan (Section 3)"
+    },
+    {
+      "id": "doc_076_q3",
+      "question": "Which port is connected to the logistics leader associated with Cumbre Export Logistics?",
+      "answer": "Port San Aurelio",
+      "hop_count": 2,
+      "entity_chain": ["Cumbre Export Logistics", "Javier Roldan", "Port San Aurelio"],
+      "sections_involved": [3, 4],
+      "answer_justification": "Cumbre Export Logistics is led by Javier Roldan (Section 3), who collaborates with Port San Aurelio (Section 4)"
+    },
+    {
+      "id": "doc_076_q4",
+      "question": "Through which intermediary organization does Alta Verde Cooperative indirectly connect to Javier Roldan?",
+      "answer": "Cumbre Export Logistics",
+      "hop_count": 3,
+      "entity_chain": ["Alta Verde Cooperative", "Marisol Quenta", "Cumbre Export Logistics", "Javier Roldan"],
+      "sections_involved": [1, 2, 3],
+      "answer_justification": "Alta Verde Cooperative connects to Marisol Quenta (Section 1); she partners with Cumbre Export Logistics (Section 2); which is led by Javier Roldan (Section 3)"
+    },
+    {
+      "id": "doc_076_q5",
+      "question": "Which organization receives shipments from the port associated with Javier Roldan’s operations?",
+      "answer": "Northwind Roasters Guild",
+      "hop_count": 3,
+      "entity_chain": ["Javier Roldan", "Port San Aurelio", "Northwind Roasters Guild"],
+      "sections_involved": [3, 4, 5],
+      "answer_justification": "Javier Roldan collaborates with Port San Aurelio (Section 4); the port ships to Northwind Roasters Guild (Section 5)"
+    },
+    {
+      "id": "doc_076_q6",
+      "question": "What is the full supply chain path from Alta Verde Cooperative to the final roasting organization?",
+      "answer": "Alta Verde Cooperative → Marisol Quenta → Cumbre Export Logistics → Javier Roldan → Port San Aurelio → Northwind Roasters Guild",
+      "hop_count": 5,
+      "entity_chain": ["Alta Verde Cooperative", "Marisol Quenta", "Cumbre Export Logistics", "Javier Roldan", "Port San Aurelio", "Northwind Roasters Guild"],
+      "sections_involved": [1, 2, 3, 4, 5],
+      "answer_justification": "Each section introduces one link: Alta Verde Cooperative to Marisol Quenta (Section 1), to Cumbre Export Logistics (Section 2), to Javier Roldan (Section 3), to Port San Aurelio (Section 4), to Northwind Roasters Guild (Section 5)"
+    }
+  ]
+}
