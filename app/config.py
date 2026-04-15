@@ -53,6 +53,7 @@ class Settings(BaseSettings):
 
     # Think-on-Graph (ToG / ToG-R) retriever
     tog_depth_max: int = 3
+    tog_max_paths: int = 8
 
 
 settings = Settings()

@@ -231,6 +231,7 @@ class ServiceFactory:
                 llm=self._llm,
                 beam_width=settings.beam_search_beam_width,
                 depth_max=settings.tog_depth_max,
+                max_paths=settings.tog_max_paths,
                 vector_store=self._vector_store,
             )
         if mode == QueryMode.TOG_R:
@@ -240,6 +241,7 @@ class ServiceFactory:
                 llm=self._llm,
                 beam_width=settings.beam_search_beam_width,
                 depth_max=settings.tog_depth_max,
+                max_paths=settings.tog_max_paths,
                 vector_store=self._vector_store,
             )
         return NoneRetriever()

@@ -234,6 +234,10 @@ class ToGRetriever(BaseRetriever):
                      answer generation.
         beam_width:  Maximum relations kept per entity per hop (paper default N=3).
         depth_max:   Hard cap on exploration iterations (paper default D_max=3).
+        max_paths:   Maximum surviving paths after Step D entity pruning at each
+                     depth.  Paths are ranked by the LLM entity score and the
+                     top ``max_paths`` are kept, bounding prompt growth across
+                     depths (default 8).
         examples:    Few-shot demonstrations forwarded to all four ToG prompts.
                      Defaults to :data:`~app.prompts.TOG_DEFAULT_EXAMPLES`.
 
@@ -249,6 +253,7 @@ class ToGRetriever(BaseRetriever):
         llm: BaseLLM,
         beam_width: int = 3,
         depth_max: int = 3,
+        max_paths: int = 8,
         examples: list[dict] | None = None,
         vector_store: BaseVectorStore | None = None,
     ) -> None:
@@ -256,6 +261,7 @@ class ToGRetriever(BaseRetriever):
         self._llm = llm
         self._beam_width = beam_width
         self._depth_max = depth_max
+        self._max_paths = max_paths
         self._examples: list[dict] = (
             examples if examples is not None else TOG_DEFAULT_EXAMPLES
         )
@@ -458,17 +464,23 @@ class ToGRetriever(BaseRetriever):
                 len(non_empty_candidates),
             )
             prune_results = await self._entity_prune_batch(query, non_empty_candidates)
-            new_paths: list[dict[str, Any]] = []
-            for new_path in prune_results:
+            scored_paths: list[tuple[dict[str, Any], float]] = []
+            for new_path, score in prune_results:
                 if new_path is not None:
-                    new_paths.append(new_path)
-                    visited_entities.add(new_path["nodes"][-1]["id"])
+                    scored_paths.append((new_path, score))
                     logger.debug(
-                        "ToGRetriever [D]: finalised path → %s", _format_path(new_path)
+                        "ToGRetriever [D]: finalised path (score=%.2f) → %s",
+                        score, _format_path(new_path),
                     )
+            scored_paths.sort(key=lambda x: x[1], reverse=True)
+            scored_paths = scored_paths[: self._max_paths]
+            new_paths: list[dict[str, Any]] = []
+            for new_path, _ in scored_paths:
+                new_paths.append(new_path)
+                visited_entities.add(new_path["nodes"][-1]["id"])
             logger.info(
-                "ToGRetriever [D]: done in %.1fs — %d paths finalised",
-                time.monotonic() - t_d, len(new_paths),
+                "ToGRetriever [D]: done in %.1fs — %d paths finalised (capped at max_paths=%d)",
+                time.monotonic() - t_d, len(new_paths), self._max_paths,
             )
 
             if not new_paths:
@@ -480,22 +492,30 @@ class ToGRetriever(BaseRetriever):
             paths = new_paths  # E^D is now the tail of each path in new_paths
 
             # ── Phase 3: Reasoning sufficiency check ─────────────────────
+            # Skipped at max depth: the loop ends regardless, so the check
+            # would be wasted — the fallback below handles generation instead.
             path_strings = [_format_path(p) for p in paths]
             source_chunks = await _collect_source_chunks(paths, self._vector_store)
-            sufficient = await self._check_reasoning(query, path_strings, source_chunks)
-            logger.info(
-                "ToGRetriever [Phase 3]: depth=%d sufficient=%s paths=%d chunks=%d "
-                "(depth wall time=%.1fs)",
-                depth, sufficient, len(path_strings), len(source_chunks),
-                time.monotonic() - t_depth,
-            )
-
-            if sufficient:
-                # Phase 4: Generate the final answer from accumulated paths.
-                answer = await self._generate_answer(query, path_strings, source_chunks)
-                break
+            if depth < self._depth_max:
+                sufficient = await self._check_reasoning(query, path_strings, source_chunks)
+                logger.info(
+                    "ToGRetriever [Phase 3]: depth=%d sufficient=%s paths=%d chunks=%d "
+                    "(depth wall time=%.1fs)",
+                    depth, sufficient, len(path_strings), len(source_chunks),
+                    time.monotonic() - t_depth,
+                )
+                if sufficient:
+                    # Phase 4: Generate the final answer from accumulated paths.
+                    answer = await self._generate_answer(query, path_strings, source_chunks)
+                    break
+            else:
+                logger.info(
+                    "ToGRetriever [Phase 3]: depth=%d is max — skipping reasoning check "
+                    "(depth wall time=%.1fs)",
+                    depth, time.monotonic() - t_depth,
+                )
             # "No" and depth < depth_max → implicit continue to next iteration.
-            # "No" and depth == depth_max → loop ends; fallback applied below.
+            # depth == depth_max → loop ends; fallback applied below.
 
         # If depth_max reached without a "Yes", generate with available paths + chunks.
         if answer is None:
@@ -702,7 +722,7 @@ class ToGRetriever(BaseRetriever):
         self,
         question: str,
         path_candidates: list[tuple[dict[str, Any], list[dict[str, Any]]]],
-    ) -> list[dict[str, Any] | None]:
+    ) -> list[tuple[dict[str, Any] | None, float]]:
         """Prune and select entities for all paths in a single LLM call (Step D).
 
         Replaces the ``asyncio.gather`` fan-out over ``_entity_prune`` with
@@ -714,8 +734,10 @@ class ToGRetriever(BaseRetriever):
                              tuples, one entry per pending path.
 
         Returns:
-            List of finalised path dicts (or ``None`` if the LLM selected
-            nothing), same length and order as ``path_candidates``.
+            List of (finalised_path_dict | None, score) tuples, same length and
+            order as ``path_candidates``.  Score is the LLM relevance score of
+            the selected entity (0.0 when nothing was selected), used by callers
+            to rank and cap the surviving path set.
         """
         rel_name_pairs = [
             (pending["relations"][-1], [c["name"] for c in candidates])
@@ -727,28 +749,32 @@ class ToGRetriever(BaseRetriever):
             response_model=_BatchEntityPruneResult,
             system_prompt=TOG_BATCH_ENTITY_PRUNE_SYSTEM_PROMPT,
         )
-        idx_to_name: dict[int, str] = {}
+        idx_to_selection: dict[int, tuple[str, float]] = {}
         if result and result.results:
             for entry in result.results:
                 if entry.entities:
                     best = max(entry.entities, key=lambda e: e.score)
-                    idx_to_name[entry.idx] = best.entity
+                    idx_to_selection[entry.idx] = (best.entity, best.score)
 
-        new_paths: list[dict[str, Any] | None] = []
+        new_paths: list[tuple[dict[str, Any] | None, float]] = []
         for i, (pending, candidates) in enumerate(path_candidates):
-            selected_name = idx_to_name.get(i)
-            if selected_name is None:
-                new_paths.append(None)
+            selection = idx_to_selection.get(i)
+            if selection is None:
+                new_paths.append((None, 0.0))
                 continue
+            selected_name, score = selection
             selected_dict = next(
                 (c for c in candidates if c["name"].lower() == selected_name.lower()),
                 {"id": selected_name, "name": selected_name, "source_chunk_id": "", "edge_chunk_id": ""},
             )
-            new_paths.append({
-                "nodes": pending["nodes"] + [selected_dict],
-                "relations": list(pending["relations"]),
-                "edge_chunk_ids": list(pending["edge_chunk_ids"]) + [selected_dict.get("edge_chunk_id", "")],
-            })
+            new_paths.append((
+                {
+                    "nodes": pending["nodes"] + [selected_dict],
+                    "relations": list(pending["relations"]),
+                    "edge_chunk_ids": list(pending["edge_chunk_ids"]) + [selected_dict.get("edge_chunk_id", "")],
+                },
+                score,
+            ))
         return new_paths
 
     async def _check_reasoning(
@@ -867,7 +893,7 @@ class ToGRRetriever(ToGRetriever):
         self,
         question: str,
         path_candidates: list[tuple[dict[str, Any], list[dict[str, Any]]]],
-    ) -> list[dict[str, Any] | None]:
+    ) -> list[tuple[dict[str, Any] | None, float]]:
         """Randomly select one entity per path (Phase 2, Step D) — no LLM calls.
 
         Overrides :meth:`ToGRetriever._entity_prune_batch` to use uniform
@@ -885,13 +911,14 @@ class ToGRRetriever(ToGRetriever):
                              tuples.
 
         Returns:
-            List of finalised path dicts (or ``None`` for empty candidate
-            sets), same length and order as ``path_candidates``.
+            List of (finalised_path_dict | None, score) tuples, same length and
+            order as ``path_candidates``.  Score is always 1.0 (uniform random
+            selection assigns equal weight to all paths).
         """
-        new_paths: list[dict[str, Any] | None] = []
+        new_paths: list[tuple[dict[str, Any] | None, float]] = []
         for pending, candidates in path_candidates:
             if not candidates:
-                new_paths.append(None)
+                new_paths.append((None, 0.0))
                 continue
             pool = (
                 candidates
@@ -899,9 +926,12 @@ class ToGRRetriever(ToGRetriever):
                 else random.sample(candidates, self._beam_width)
             )
             selected = random.choice(pool)
-            new_paths.append({
-                "nodes": pending["nodes"] + [selected],
-                "relations": list(pending["relations"]),
-                "edge_chunk_ids": list(pending["edge_chunk_ids"]) + [selected.get("edge_chunk_id", "")],
-            })
+            new_paths.append((
+                {
+                    "nodes": pending["nodes"] + [selected],
+                    "relations": list(pending["relations"]),
+                    "edge_chunk_ids": list(pending["edge_chunk_ids"]) + [selected.get("edge_chunk_id", "")],
+                },
+                1.0,
+            ))
         return new_paths
