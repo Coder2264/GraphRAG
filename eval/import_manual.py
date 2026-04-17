@@ -59,7 +59,7 @@ _VALID_DOMAINS = {
     "corporate_history", "scientific_research", "academic_collaboration",
     "medical_research", "tech_genealogy", "legal_proceedings",
     "historical_politics", "supply_chain", "nonprofit_foundations",
-    "cultural_institutions",
+    "cultural_institutions", "fantasy",
 }
 
 
