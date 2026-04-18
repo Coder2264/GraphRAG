@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from typing import Any
 
 import httpx
@@ -20,6 +21,9 @@ from app.core.entity_extractor import BaseEntityExtractor
 from app.prompts import EXTRACTION_SYSTEM_PROMPT, extraction_user_prompt
 
 logger = logging.getLogger(__name__)
+_llm_logger = logging.getLogger("app.llm")
+
+_SEP = "═" * 72
 
 
 class OllamaEntityExtractor(BaseEntityExtractor):
@@ -70,6 +74,7 @@ class OllamaEntityExtractor(BaseEntityExtractor):
             },
         }
 
+        start = time.monotonic()
         try:
             async with httpx.AsyncClient(timeout=settings.ollama_extraction_timeout) as client:
                 response = await client.post(
@@ -79,7 +84,24 @@ class OllamaEntityExtractor(BaseEntityExtractor):
                 response.raise_for_status()
                 data = response.json()
 
+            elapsed = time.monotonic() - start
             raw = data["message"]["content"]
+            _llm_logger.info(
+                "\n".join([
+                    _SEP,
+                    "  METHOD  : extract (entity extraction)",
+                    f"  CLASS   : {self.__class__.__name__}",
+                    f"  MODEL   : {self._model}",
+                    f"  DURATION: {elapsed:.3f}s",
+                    "─── system_prompt " + "─" * 54,
+                    EXTRACTION_SYSTEM_PROMPT,
+                    "─── prompt " + "─" * 61,
+                    user_msg,
+                    "─── response " + "─" * 59,
+                    raw,
+                    _SEP,
+                ])
+            )
             return self._parse_response(raw)
 
         except Exception as exc:  # noqa: BLE001

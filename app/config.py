@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     gemini_llm_model: str = "gemini-3-flash-preview"
     gemini_embed_model: str = "models/gemini-embedding-2-preview"
     gemini_extraction_model: str = "gemini-3-flash-preview"
+    gemini_thinking_budget: int = 0  # 0 = disable thinking; set >0 for light reasoning
 
     # Databases
     postgres_dsn: str = ""

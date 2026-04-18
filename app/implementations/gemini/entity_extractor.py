@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from typing import Any
 
 from google import genai
@@ -21,6 +22,9 @@ from app.core.entity_extractor import BaseEntityExtractor
 from app.prompts import EXTRACTION_SYSTEM_PROMPT, extraction_user_prompt
 
 logger = logging.getLogger(__name__)
+_llm_logger = logging.getLogger("app.llm")
+
+_SEP = "═" * 72
 
 
 class GeminiEntityExtractor(BaseEntityExtractor):
@@ -56,6 +60,7 @@ class GeminiEntityExtractor(BaseEntityExtractor):
             Empty lists on any error (graceful degradation).
         """
         user_msg = extraction_user_prompt(text, processing_instruction)
+        start = time.monotonic()
         try:
             config = types.GenerateContentConfig(
                 temperature=0.0,
@@ -67,7 +72,25 @@ class GeminiEntityExtractor(BaseEntityExtractor):
                 contents=user_msg,
                 config=config,
             )
-            return self._parse_response(response.text)
+            elapsed = time.monotonic() - start
+            raw = response.text
+            _llm_logger.info(
+                "\n".join([
+                    _SEP,
+                    "  METHOD  : extract (entity extraction)",
+                    f"  CLASS   : {self.__class__.__name__}",
+                    f"  MODEL   : {self._model_name}",
+                    f"  DURATION: {elapsed:.3f}s",
+                    "─── system_prompt " + "─" * 54,
+                    EXTRACTION_SYSTEM_PROMPT,
+                    "─── prompt " + "─" * 61,
+                    user_msg,
+                    "─── response " + "─" * 59,
+                    raw,
+                    _SEP,
+                ])
+            )
+            return self._parse_response(raw)
         except Exception as exc:  # noqa: BLE001
             logger.warning("GeminiEntityExtractor: extraction failed: %s", exc)
             return {"entities": [], "relations": []}

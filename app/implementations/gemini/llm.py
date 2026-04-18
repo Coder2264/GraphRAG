@@ -34,9 +34,15 @@ class GeminiLLM(BaseLLM):
         model_name: Gemini model identifier (e.g. "gemini-2.0-flash").
     """
 
-    def __init__(self, api_key: str, model_name: str = "gemini-2.0-flash") -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model_name: str = "gemini-2.0-flash",
+        thinking_budget: int = 0,
+    ) -> None:
         self._client = genai.Client(api_key=api_key)
         self._model_name = model_name
+        self._thinking_config = types.ThinkingConfig(thinking_budget=thinking_budget)
 
     # ------------------------------------------------------------------
     # BaseLLM interface
@@ -55,6 +61,7 @@ class GeminiLLM(BaseLLM):
         config = types.GenerateContentConfig(
             temperature=0.7,
             system_instruction=system_prompt or None,
+            thinking_config=self._thinking_config,
         )
         response = await self._client.aio.models.generate_content(
             model=self._model_name,
@@ -86,6 +93,7 @@ class GeminiLLM(BaseLLM):
             temperature=0.0,
             response_mime_type="application/json",
             system_instruction=system_prompt or None,
+            thinking_config=self._thinking_config,
         )
         response = await self._client.aio.models.generate_content(
             model=self._model_name,

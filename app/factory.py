@@ -106,6 +106,7 @@ class ServiceFactory:
             return cls(  # type: ignore[call-arg]
                 api_key=settings.gemini_api_key,
                 model_name=settings.gemini_llm_model,
+                thinking_budget=settings.gemini_thinking_budget,
             )
         return cls()
 
