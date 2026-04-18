@@ -11,6 +11,7 @@ from typing import Annotated
 
 from fastapi import Depends
 
+from app.core.embedder import BaseEmbedder
 from app.core.graph_store import BaseGraphStore
 from app.core.vector_store import BaseVectorStore
 from app.factory import ServiceFactory
@@ -44,6 +45,12 @@ def get_ingestion_service(
         pipeline=factory.get_ingestion_pipeline(),
         graph_rag_pipeline=factory.get_graph_rag_ingestion_pipeline(),
     )
+
+
+def get_embedder(
+    factory: Annotated[ServiceFactory, Depends(get_factory)],
+) -> BaseEmbedder:
+    return factory.get_embedder()
 
 
 def get_vector_store(

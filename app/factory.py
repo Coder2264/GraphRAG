@@ -251,6 +251,10 @@ class ServiceFactory:
         assert self._llm
         return self._llm
 
+    def get_embedder(self) -> BaseEmbedder:
+        assert self._embedder
+        return self._embedder
+
     def get_vector_store(self) -> BaseVectorStore:
         assert self._vector_store
         return self._vector_store
