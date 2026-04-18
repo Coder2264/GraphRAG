@@ -29,7 +29,7 @@ class InMemoryLLM(BaseLLM):
     def __init__(self, model_name: str = "in-memory-v1") -> None:
         self.model_name = model_name
 
-    async def generate(
+    async def _generate(
         self, prompt: str, context: str = "", system_prompt: str = ""
     ) -> str:
         """Return a stub response incorporating the query and context summary."""
@@ -39,7 +39,7 @@ class InMemoryLLM(BaseLLM):
             "Replace InMemoryLLM with a real LLM implementation."
         )
 
-    async def generate_structured(
+    async def _generate_structured(
         self,
         prompt: str,
         response_model: Type[BaseModel],

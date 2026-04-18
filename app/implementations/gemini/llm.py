@@ -42,7 +42,7 @@ class GeminiLLM(BaseLLM):
     # BaseLLM interface
     # ------------------------------------------------------------------
 
-    async def generate(
+    async def _generate(
         self, prompt: str, context: str = "", system_prompt: str = ""
     ) -> str:
         """
@@ -63,7 +63,7 @@ class GeminiLLM(BaseLLM):
         )
         return response.text
 
-    async def generate_structured(
+    async def _generate_structured(
         self,
         prompt: str,
         response_model: Type[BaseModel],

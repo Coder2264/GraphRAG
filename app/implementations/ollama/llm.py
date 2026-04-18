@@ -48,7 +48,7 @@ class OllamaLLM(BaseLLM):
     # BaseLLM interface
     # ------------------------------------------------------------------
 
-    async def generate(
+    async def _generate(
         self, prompt: str, context: str = "", system_prompt: str = ""
     ) -> str:
         """
@@ -72,7 +72,7 @@ class OllamaLLM(BaseLLM):
         )
         return response.message.content  # type: ignore[attr-defined]
 
-    async def generate_structured(
+    async def _generate_structured(
         self,
         prompt: str,
         response_model: Type[BaseModel],
@@ -97,7 +97,7 @@ class OllamaLLM(BaseLLM):
             f"{response_model.model_json_schema()}\n"
             "Return ONLY the JSON object, no explanation."
         )
-        raw = await self.generate(json_prompt, context, system_prompt)
+        raw = await self._generate(json_prompt, context, system_prompt)
 
         # Strip markdown fences if present
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
