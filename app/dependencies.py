@@ -11,6 +11,8 @@ from typing import Annotated
 
 from fastapi import Depends
 
+from app.core.graph_store import BaseGraphStore
+from app.core.vector_store import BaseVectorStore
 from app.factory import ServiceFactory
 from app.models.query import QueryMode
 from app.services.ingestion_service import IngestionService
@@ -42,6 +44,18 @@ def get_ingestion_service(
         pipeline=factory.get_ingestion_pipeline(),
         graph_rag_pipeline=factory.get_graph_rag_ingestion_pipeline(),
     )
+
+
+def get_vector_store(
+    factory: Annotated[ServiceFactory, Depends(get_factory)],
+) -> BaseVectorStore:
+    return factory.get_vector_store()
+
+
+def get_graph_store(
+    factory: Annotated[ServiceFactory, Depends(get_factory)],
+) -> BaseGraphStore:
+    return factory.get_graph_store()
 
 
 def get_query_service_for_mode(mode: QueryMode):

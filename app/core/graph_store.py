@@ -166,3 +166,8 @@ class BaseGraphStore(ABC):
     async def delete_nodes_by_doc_id(self, doc_id: str) -> None:
         """Delete all nodes whose 'doc_id' property equals doc_id, and their edges."""
         ...
+
+    @abstractmethod
+    async def clear(self) -> None:
+        """Delete ALL nodes and relationships — use only for testing cleanup."""
+        ...

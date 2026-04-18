@@ -146,3 +146,7 @@ class InMemoryGraphStore(BaseGraphStore):
             e for e in self._edges
             if e["src"] not in to_delete and e["dst"] not in to_delete
         ]
+
+    async def clear(self) -> None:
+        self._nodes.clear()
+        self._edges.clear()

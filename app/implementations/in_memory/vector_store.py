@@ -59,6 +59,9 @@ class InMemoryVectorStore(BaseVectorStore):
     async def delete(self, doc_id: str) -> None:
         self._store.pop(doc_id, None)
 
+    async def clear(self) -> None:
+        self._store.clear()
+
     # ------------------------------------------------------------------
     # Read
     # ------------------------------------------------------------------

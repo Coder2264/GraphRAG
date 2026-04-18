@@ -61,6 +61,11 @@ class BaseVectorStore(ABC):
         """Remove a document vector by ID."""
         ...
 
+    @abstractmethod
+    async def clear(self) -> None:
+        """Delete ALL stored vectors — use only for testing cleanup."""
+        ...
+
     # ------------------------------------------------------------------
     # Read operations
     # ------------------------------------------------------------------

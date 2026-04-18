@@ -249,3 +249,11 @@ class ServiceFactory:
     def get_llm(self) -> BaseLLM:
         assert self._llm
         return self._llm
+
+    def get_vector_store(self) -> BaseVectorStore:
+        assert self._vector_store
+        return self._vector_store
+
+    def get_graph_store(self) -> BaseGraphStore:
+        assert self._graph_store
+        return self._graph_store

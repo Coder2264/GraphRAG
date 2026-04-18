@@ -190,6 +190,12 @@ class PostgresVectorStore(BaseVectorStore):
                 f"DELETE FROM {self._table} WHERE doc_id = $1;", doc_id
             )
 
+    async def clear(self) -> None:
+        """Truncate the entire chunks table."""
+        assert self._pool, "Call connect() first."
+        async with self._pool.acquire() as conn:
+            await conn.execute(f"TRUNCATE TABLE {self._table};")
+
     # ------------------------------------------------------------------
     # Read
     # ------------------------------------------------------------------
