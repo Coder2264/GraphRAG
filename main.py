@@ -15,6 +15,7 @@ from app.api.v1.router import router as v1_router
 from app.dependencies import set_factory
 from app.factory import ServiceFactory
 from app.logging_config import setup_logging
+from app.middleware import SessionLoggingMiddleware
 
 
 @asynccontextmanager
@@ -54,6 +55,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(SessionLoggingMiddleware)
 
     app.include_router(v1_router)
 
