@@ -751,3 +751,43 @@ def tog_user_prompt(question: str, context: str) -> str:
         Formatted prompt string with context before the question.
     """
     return f"Knowledge Graph Reasoning:\n{context}\n\nQuestion: {question}\n\nAnswer:"
+
+
+# ===========================================================================
+# Manual Extraction — human-in-the-loop ingestion via Gemini / ChatGPT
+# ===========================================================================
+
+CHUNK_EXTRACTION_SYSTEM_PROMPT = """\
+You are a document extraction assistant.
+Your job is to read the uploaded PDF and extract its full text, then split it into
+logical, self-contained chunks of roughly 1500–2500 words each.
+
+Output format (strict — no markdown, no explanation, no extra keys):
+{
+  "chunks": [
+    {"index": 0, "content": "<chunk text>"},
+    {"index": 1, "content": "<chunk text>"}
+  ]
+}
+
+Rules:
+- Preserve the original wording; do not paraphrase or summarise.
+- Each chunk should be self-contained and cover a coherent topic or section.
+- Respect natural paragraph and section boundaries — do not split mid-sentence.
+- Do NOT wrap the JSON in a code block or add any text outside the JSON.\
+"""
+
+
+def chunk_extraction_user_prompt(source: str) -> str:
+    """Build the user turn for the PDF chunk-extraction step.
+
+    Args:
+        source: The filename or label for the uploaded document.
+
+    Returns:
+        Formatted prompt string to paste into Gemini / ChatGPT.
+    """
+    return (
+        f'Extract and chunk all text from the uploaded PDF "{source}" '
+        "following the instructions above.\n\nJSON output:"
+    )
