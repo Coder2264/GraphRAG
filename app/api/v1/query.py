@@ -21,21 +21,23 @@ router = APIRouter(prefix="/query", tags=["query"])
 # independently testable and documentable in Swagger.
 # ------------------------------------------------------------------
 
-@router.post(
-    "/graphrag",
-    response_model=QueryResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Query using GraphRAG",
-    description=(
-        "Retrieves context by traversing the knowledge graph, then generates "
-        "an answer grounded in graph-derived context."
-    ),
-)
-async def query_graphrag(
-    request: QueryRequest,
-    service: Annotated[QueryService, Depends(get_query_service_for_mode(QueryMode.GRAPHRAG))],
-) -> QueryResponse:
-    return await service.answer(request, mode=QueryMode.GRAPHRAG)
+# DEPRECATED: /graphrag endpoint (IterativeGraphRAGRetriever) removed from public API.
+# The implementation is preserved in app/implementations/graph_rag/retriever.py.
+# @router.post(
+#     "/graphrag",
+#     response_model=QueryResponse,
+#     status_code=status.HTTP_200_OK,
+#     summary="Query using GraphRAG",
+#     description=(
+#         "Retrieves context by traversing the knowledge graph, then generates "
+#         "an answer grounded in graph-derived context."
+#     ),
+# )
+# async def query_graphrag(
+#     request: QueryRequest,
+#     service: Annotated[QueryService, Depends(get_query_service_for_mode(QueryMode.GRAPHRAG))],
+# ) -> QueryResponse:
+#     return await service.answer(request, mode=QueryMode.GRAPHRAG)
 
 
 @router.post(
@@ -90,19 +92,21 @@ async def query_tog(
     return await service.answer(request, mode=QueryMode.TOG)
 
 
-@router.post(
-    "/tog_r",
-    response_model=QueryResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Query using Think-on-Graph with Random pruning (ToG-R)",
-    description=(
-        "Variant of ToG where entity pruning (Step D) uses random sampling instead "
-        "of LLM scoring, halving the number of LLM calls while preserving the "
-        "relation-pruning and reasoning-check steps."
-    ),
-)
-async def query_tog_r(
-    request: QueryRequest,
-    service: Annotated[QueryService, Depends(get_query_service_for_mode(QueryMode.TOG_R))],
-) -> QueryResponse:
-    return await service.answer(request, mode=QueryMode.TOG_R)
+# DEPRECATED: /tog_r endpoint (ToG-R with random entity pruning) removed from public API.
+# The implementation is preserved in app/implementations/graph_rag/tog_retriever.py.
+# @router.post(
+#     "/tog_r",
+#     response_model=QueryResponse,
+#     status_code=status.HTTP_200_OK,
+#     summary="Query using Think-on-Graph with Random pruning (ToG-R)",
+#     description=(
+#         "Variant of ToG where entity pruning (Step D) uses random sampling instead "
+#         "of LLM scoring, halving the number of LLM calls while preserving the "
+#         "relation-pruning and reasoning-check steps."
+#     ),
+# )
+# async def query_tog_r(
+#     request: QueryRequest,
+#     service: Annotated[QueryService, Depends(get_query_service_for_mode(QueryMode.TOG_R))],
+# ) -> QueryResponse:
+#     return await service.answer(request, mode=QueryMode.TOG_R)
